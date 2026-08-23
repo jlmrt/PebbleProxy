@@ -10,6 +10,7 @@ import { createCryptoService } from '../src/crypto.js';
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const required = [
   'Dockerfile', 'docker-compose.yml', 'umbrel-app.yml', 'exports.sh',
+  'data/.gitkeep', 'hooks/pre-start',
   'src/server.js', 'src/ai.js', 'src/recordings.js', 'src/mcp.js',
   'web/index.html', 'web/app.js', 'web/styles.css'
 ];
@@ -31,6 +32,15 @@ assert.match(compose, /ROLE:\s*admin/);
 assert.match(compose, /admin_internal:\s*\n\s*internal:\s*true/);
 assert.doesNotMatch(compose, /ports:\s*\n\s*-\s*["']?8080:/, 'Public API must not bind a host port in the Umbrel package');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel app port must match the audited public port');
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.2["']$/m);
+
+const preStart = path.join(root, 'hooks/pre-start');
+assert.ok(fs.statSync(preStart).mode & 0o111, 'Umbrel pre-start hook must be executable');
+const hookSyntax = spawnSync('bash', ['-n', preStart], { encoding: 'utf8' });
+assert.equal(hookSyntax.status, 0, hookSyntax.stderr || 'Umbrel pre-start hook syntax check failed');
+const hook = fs.readFileSync(preStart, 'utf8');
+assert.match(hook, /mkdir -p/);
+assert.match(hook, /chown 1000:1000/);
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pebble-proxy-check-'));
 try {

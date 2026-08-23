@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="${APP_DATA_DIR:-$(readlink -f "$(dirname "${BASH_SOURCE[0]}")/..")}"
+DATA_DIR="${APP_DIR}/data"
+RECORDINGS_DIR="${DATA_DIR}/recordings"
+TMP_DIR="${DATA_DIR}/tmp"
+
+mkdir -p "${DATA_DIR}" "${RECORDINGS_DIR}" "${TMP_DIR}"
+chown 1000:1000 "${DATA_DIR}" "${RECORDINGS_DIR}" "${TMP_DIR}"
+chmod 700 "${DATA_DIR}" "${RECORDINGS_DIR}" "${TMP_DIR}"
