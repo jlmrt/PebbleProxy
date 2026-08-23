@@ -72,6 +72,8 @@
     reminders: [],
     selectedRecording: null,
     pollTimer: null,
+    publicBaseUrl: "",
+    publicWebhookUrl: "",
   };
 
   class ApiError extends Error {
@@ -413,27 +415,42 @@
     window.setTimeout(() => item.remove(), duration);
   }
 
-  async function copyText(value) {
+  function copyValue(control) {
+    if (!control) return "";
+    if (typeof control.value === "string") return control.value;
+    return control.textContent || "";
+  }
+
+  function showCopiedState(button) {
+    if (!button) return;
+    const original = button.textContent;
+    button.textContent = "Copied";
+    window.setTimeout(() => {
+      if (button.textContent === "Copied") button.textContent = original;
+    }, 1800);
+  }
+
+  async function copyText(value, button = null, control = null) {
     const text = plainText(value, "");
     if (!text) {
       toast("Nothing to copy.", "warning");
       return;
     }
+    let result;
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const area = node("textarea", { value: text, readonly: true });
-        area.style.position = "fixed";
-        area.style.opacity = "0";
-        document.body.append(area);
-        area.select();
-        document.execCommand("copy");
-        area.remove();
-      }
-      toast("Copied to clipboard.", "success");
+      result = await window.PebbleClipboard.copyText({ text, control });
     } catch {
-      toast("Could not copy automatically.", "error");
+      toast("Could not prepare this value for copying.", "error", 6500);
+      return;
+    }
+    if (result.copied) {
+      showCopiedState(button);
+      try { button?.focus({ preventScroll: true }); } catch { button?.focus(); }
+      toast("Copied to clipboard.", "success");
+    } else if (result.selected) {
+      toast("Selected — press and hold, then choose Copy.", "warning", 6500);
+    } else {
+      toast("Could not copy automatically. Select the value and copy it manually.", "error", 6500);
     }
   }
 
@@ -514,6 +531,67 @@
     );
   }
 
+  function setCopyField(control, value) {
+    if (!control) return;
+    control.value = value || "";
+    const button = document.querySelector(`[data-copy-target="${control.id}"]`);
+    if (button) button.disabled = !value;
+  }
+
+  function renderConnectivity(payload) {
+    const overview = objectFrom(payload, ["overview"]);
+    const connectivity = objectFrom(first(overview, ["connectivity", "network"], overview));
+    const publicApi = objectFrom(first(connectivity, ["publicApi", "public_api"], first(overview, ["publicApi"], {})));
+    const publicBaseUrl = plainText(
+      first(connectivity, ["publicBaseUrl", "public_base_url"], first(overview, ["publicBaseUrl"], "")),
+      "",
+    );
+    const publicHostname = first(connectivity, ["publicHostname", "public_hostname", "hostname"], publicBaseUrl);
+    const webhookUrl = plainText(first(publicApi, ["webhookUrl", "webhook_url"], publicBaseUrl ? `${publicBaseUrl}/webhooks/index` : ""), "");
+    state.publicBaseUrl = publicBaseUrl;
+    state.publicWebhookUrl = webhookUrl;
+    $("#public-hostname").textContent = publicHostname ? plainText(publicHostname) : "Set your public HTTPS origin below";
+    $("#public-base-url").value = publicBaseUrl;
+    setCopyField($("#pebble-webhook-url"), webhookUrl);
+
+    const cloudflare = objectFrom(first(connectivity, ["cloudflare", "tunnel"], first(overview, ["cloudflare"], {})));
+    const serviceUrl = plainText(first(cloudflare, ["serviceUrl", "service_url", "publicTarget", "public_target"], "http://pebble-proxy_api_1:8080"));
+    setCopyField($("#cloudflare-service-url"), serviceUrl);
+    const tunnelStatus = normalizeStatus(first(cloudflare, ["status", "health"], "unknown"));
+    const tunnelLabel = tunnelStatus === "healthy"
+      ? "Connected"
+      : tunnelStatus === "not_checked"
+        ? "Not checked"
+        : plainText(first(cloudflare, ["status"], "Not checked"));
+    const cloudflareBadge = $("#cloudflare-badge");
+    cloudflareBadge.replaceWith(statusBadge(tunnelStatus, tunnelLabel));
+    const newBadge = $(".panel-header #cloudflare-badge") || $("#page-overview .panel-header .badge");
+    if (newBadge) newBadge.id = "cloudflare-badge";
+
+    const publicStatus = normalizeStatus(first(publicApi, ["status", "health"], publicBaseUrl ? "configured" : "unknown"));
+    const publicLabel = publicStatus === "healthy" ? "Online" : publicStatus === "configured" ? "Configured" : "Unknown";
+    const publicBadge = $("#public-api-status");
+    const replacement = statusBadge(publicStatus, publicLabel);
+    replacement.id = "public-api-status";
+    publicBadge.replaceWith(replacement);
+  }
+
+  async function saveConnectivity(form, submitter) {
+    setBusy(submitter, true, "Saving…");
+    try {
+      const response = await api("/connectivity", {
+        method: "PUT",
+        body: { publicBaseUrl: form.elements.publicBaseUrl.value },
+      });
+      renderConnectivity(response);
+      toast("Public client URLs saved.", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      setBusy(submitter, false);
+    }
+  }
+
   async function loadOverview() {
     const metrics = $("#overview-metrics");
     const activity = $("#overview-activity");
@@ -553,23 +631,7 @@
     updateRecordingCount(recordingCount);
     renderOverviewActivity(recordings);
 
-    const connectivity = objectFrom(first(overview, ["connectivity", "network"], {}));
-    const publicHostname = first(connectivity, ["publicHostname", "public_hostname", "hostname"], first(overview, ["publicHostname"], ""));
-    $("#public-hostname").textContent = publicHostname ? plainText(publicHostname) : "Add your public hostname";
-
-    const cloudflare = objectFrom(first(connectivity, ["cloudflare", "tunnel"], first(overview, ["cloudflare"], {})));
-    const tunnelStatus = normalizeStatus(first(cloudflare, ["status", "health"], "unknown"));
-    const cloudflareBadge = $("#cloudflare-badge");
-    cloudflareBadge.replaceWith(statusBadge(tunnelStatus, tunnelStatus === "healthy" ? "Connected" : plainText(first(cloudflare, ["status"], "Not checked"))));
-    const newBadge = $(".panel-header #cloudflare-badge") || $("#page-overview .panel-header .badge");
-    if (newBadge) newBadge.id = "cloudflare-badge";
-
-    const publicApi = objectFrom(first(connectivity, ["publicApi", "public_api"], first(overview, ["publicApi"], {})));
-    const publicStatus = normalizeStatus(first(publicApi, ["status", "health"], "unknown"));
-    const publicBadge = $("#public-api-status");
-    const replacement = statusBadge(publicStatus, publicStatus === "healthy" ? "Online" : plainText(first(publicApi, ["status"], "Unknown")));
-    replacement.id = "public-api-status";
-    publicBadge.replaceWith(replacement);
+    renderConnectivity(overview);
   }
 
   function renderOverviewActivity(recordings) {
@@ -675,7 +737,15 @@
       for (const checkbox of $$('input[name="scopes"]', form)) checkbox.checked = true;
       form.elements.rateLimit.value = "30";
       if (token) {
-        $("#new-device-token").textContent = plainText(token, "");
+        $("#new-device-token").value = plainText(token, "");
+        const tokenWebhook = $("#token-webhook");
+        if (state.publicWebhookUrl) {
+          $("#new-device-webhook-url").value = state.publicWebhookUrl;
+          tokenWebhook.hidden = false;
+        } else {
+          $("#new-device-webhook-url").value = "";
+          tokenWebhook.hidden = true;
+        }
         $("#token-saved").checked = false;
         $("#close-token-dialog").disabled = true;
         showDialog($("#token-dialog"));
@@ -1219,7 +1289,7 @@
 
     const transcriptCard = (title, source, textValue) => {
       const copyButton = node("button", { class: "copy-button", type: "button", text: "Copy", disabled: !textValue });
-      copyButton.addEventListener("click", () => copyText(textValue));
+      copyButton.addEventListener("click", () => copyText(textValue, copyButton));
       return node(
         "section",
         { class: "transcript-card" },
@@ -1469,7 +1539,7 @@
     for (const button of $$('[data-copy-target]')) {
       button.addEventListener("click", () => {
         const target = document.getElementById(button.dataset.copyTarget);
-        copyText(target ? target.textContent : "");
+        copyText(copyValue(target), button, target);
       });
     }
 
@@ -1494,7 +1564,9 @@
       $("#close-token-dialog").disabled = !event.target.checked;
     });
     $("#close-token-dialog").addEventListener("click", () => {
-      $("#new-device-token").textContent = "";
+      $("#new-device-token").value = "";
+      $("#new-device-webhook-url").value = "";
+      $("#token-webhook").hidden = true;
       closeDialog($("#token-dialog"));
     });
     $("#token-dialog").addEventListener("cancel", (event) => {
@@ -1519,6 +1591,7 @@
     $("#test-stt").addEventListener("click", (event) => testStt(event.currentTarget));
 
     bindFormDialog("#device-form", createDevice);
+    bindFormDialog("#connectivity-form", saveConnectivity);
     bindFormDialog("#backend-form", createBackend);
     bindFormDialog("#alias-form", createAlias);
     bindFormDialog("#note-form", createNote);

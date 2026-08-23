@@ -2,12 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b0f">
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.3">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -129,11 +129,23 @@
                     <span class="badge badge-success">Private</span>
                   </div>
                 </div>
+                <form class="connectivity-form" id="connectivity-form">
+                  <div class="field">
+                    <label for="public-base-url">Public HTTPS origin</label>
+                    <div class="connectivity-origin-row"><input id="public-base-url" name="publicBaseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://voice.example.com" required><button class="button button-secondary" id="save-public-base-url" type="submit">Save</button></div>
+                    <small>Enter the public hostname configured in the separate Cloudflared app. Pebble Proxy cannot discover it automatically.</small>
+                  </div>
+                </form>
                 <div class="copy-field">
-                  <label for="cloudflare-service-url">Cloudflared service URL</label>
-                  <div><code id="cloudflare-service-url">http://pebble-proxy_api_1:8080</code><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
+                  <label for="pebble-webhook-url">Pebble webhook URL</label>
+                  <div><input id="pebble-webhook-url" type="text" readonly spellcheck="false" placeholder="Set the public HTTPS origin above"><button type="button" class="copy-button" id="copy-pebble-webhook-url" data-copy-target="pebble-webhook-url" disabled>Copy</button></div>
                 </div>
-                <p class="helper">Configure this address as the service for your published hostname in the separately installed Cloudflared Umbrel app.</p>
+                <p class="helper">In the Pebble app, use this exact URL and add a header named <code>Authorization</code> with the value <code>Bearer &lt;one-time device token&gt;</code>. Enable the token’s Voice webhook scope.</p>
+                <div class="copy-field copy-field-secondary">
+                  <label for="cloudflare-service-url">Internal Cloudflared target (Docker only)</label>
+                  <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
+                </div>
+                <p class="helper">Paste this into Cloudflared’s Service field. Port 8080 exists only inside the Pebble Proxy API container; it is not opened on the Umbrel host.</p>
               </article>
 
               <article class="panel">
@@ -279,7 +291,14 @@
         <div class="success-seal" aria-hidden="true">✓</div>
         <h2>Token created</h2>
         <p class="modal-intro">Copy it now. This secret will not be displayed again.</p>
-        <div class="token-display"><code id="new-device-token"></code><button class="copy-button" type="button" data-copy-target="new-device-token">Copy</button></div>
+        <div class="token-display"><textarea id="new-device-token" rows="3" readonly spellcheck="false" aria-label="One-time device token"></textarea><button class="copy-button" id="copy-device-token" type="button" data-copy-target="new-device-token">Copy</button></div>
+        <div class="token-webhook" id="token-webhook" hidden>
+          <div class="copy-field">
+            <label for="new-device-webhook-url">Pebble webhook URL</label>
+            <div><input id="new-device-webhook-url" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-webhook-url">Copy</button></div>
+          </div>
+          <p class="helper">In the Pebble app, add an <code>Authorization</code> header whose value is <code>Bearer</code>, one space, then the token above.</p>
+        </div>
         <label class="confirm-check"><input type="checkbox" id="token-saved"><span>I saved this token somewhere secure.</span></label>
         <button class="button button-primary button-block" id="close-token-dialog" type="button" disabled>Done</button>
       </div>
@@ -346,6 +365,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/app.js?v=0.1.0" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.3" defer></script>
+    <script src="/app.js?v=0.1.0-test.3" defer></script>
   </body>
 </html>

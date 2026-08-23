@@ -61,6 +61,45 @@ test('admin creates one-time scoped device credentials without returning stored 
   assert.equal(stored.secret_hash.includes(created.body.token), false);
 });
 
+test('admin exposes and persists exact public client endpoints', async (t) => {
+  const app = fixture(t);
+  const initial = await dispatch(app.router, 'GET', '/admin/api/overview');
+  assert.equal(initial.body.publicBaseUrl, 'https://pebble.example');
+  assert.equal(initial.body.connectivity.cloudflare.serviceUrl, 'http://pebble-proxy_api_1:8080');
+  assert.equal(initial.body.connectivity.publicApi.webhookUrl, 'https://pebble.example/webhooks/index');
+  assert.equal(initial.body.connectivity.publicApi.openAiBaseUrl, 'https://pebble.example/v1');
+  assert.equal(initial.body.connectivity.publicApi.mcpUrl, 'https://pebble.example/mcp');
+
+  const updated = await dispatch(app.router, 'PUT', '/admin/api/connectivity', {
+    publicBaseUrl: 'https://Voice.Example:8443/'
+  });
+  assert.equal(updated.body.connectivity.publicBaseUrl, 'https://voice.example:8443');
+  assert.equal(updated.body.connectivity.publicApi.webhookUrl, 'https://voice.example:8443/webhooks/index');
+  assert.equal(
+    app.db.prepare("SELECT value FROM settings WHERE key = 'public_base_url'").get().value,
+    'https://voice.example:8443'
+  );
+
+  const persisted = await dispatch(app.router, 'GET', '/admin/api/overview');
+  assert.equal(persisted.body.publicBaseUrl, 'https://voice.example:8443');
+});
+
+test('admin rejects unsafe or ambiguous public origins', async (t) => {
+  const app = fixture(t);
+  for (const publicBaseUrl of [
+    'http://voice.example',
+    'https://user:secret@voice.example',
+    'https://voice.example/webhooks/index',
+    'https://voice.example?next=other',
+    'not a URL'
+  ]) {
+    await assert.rejects(
+      dispatch(app.router, 'PUT', '/admin/api/connectivity', { publicBaseUrl }),
+      (error) => error.status === 400 && error.code === 'invalid_public_base_url'
+    );
+  }
+});
+
 test('admin stores encrypted backend credentials and exposes only public aliases', async (t) => {
   const app = fixture(t);
   const backend = await dispatch(app.router, 'POST', '/admin/api/backends', {

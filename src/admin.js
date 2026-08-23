@@ -210,14 +210,70 @@ function ensureAlias(value) {
   return alias;
 }
 
+const PUBLIC_BASE_URL_SETTING = 'public_base_url';
+const CLOUDFLARED_SERVICE_URL = 'http://pebble-proxy_api_1:8080';
+
+function normalizePublicBaseUrl(value) {
+  const raw = String(value || '').trim();
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new HttpError(400, 'invalid_public_base_url', 'Enter a valid public HTTPS origin');
+  }
+  if (parsed.protocol !== 'https:' || !parsed.hostname) {
+    throw new HttpError(400, 'invalid_public_base_url', 'The public origin must use HTTPS');
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash || !['', '/'].includes(parsed.pathname)) {
+    throw new HttpError(400, 'invalid_public_base_url', 'Enter only the HTTPS origin, without credentials, a path, query, or fragment');
+  }
+  return parsed.origin;
+}
+
+function configuredPublicBaseUrl(db, config) {
+  const stored = db.prepare('SELECT value FROM settings WHERE key = ?').get(PUBLIC_BASE_URL_SETTING)?.value;
+  const candidate = stored || config.publicBaseUrl;
+  if (!candidate) return '';
+  try {
+    return normalizePublicBaseUrl(candidate);
+  } catch {
+    return '';
+  }
+}
+
+function connectivityView(db, config) {
+  const publicBaseUrl = configuredPublicBaseUrl(db, config);
+  const webhookUrl = publicBaseUrl ? `${publicBaseUrl}/webhooks/index` : '';
+  return {
+    publicBaseUrl,
+    publicHostname: publicBaseUrl,
+    cloudflare: {
+      managedExternally: true,
+      status: 'not_checked',
+      serviceUrl: CLOUDFLARED_SERVICE_URL,
+      publicTarget: CLOUDFLARED_SERVICE_URL,
+      adminPublic: false
+    },
+    publicApi: {
+      status: publicBaseUrl ? 'configured' : 'unknown',
+      baseUrl: publicBaseUrl,
+      webhookUrl,
+      openAiBaseUrl: publicBaseUrl ? `${publicBaseUrl}/v1` : '',
+      mcpUrl: publicBaseUrl ? `${publicBaseUrl}/mcp` : ''
+    }
+  };
+}
+
 function overview(db, config) {
   const count = (table, where = '') => db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count;
   const stt = db.prepare('SELECT health_status, enabled FROM stt_config WHERE id = 1').get();
+  const connectivity = connectivityView(db, config);
   return {
     version: '0.1.0',
     role: config.role,
-    publicBaseUrl: config.publicBaseUrl,
-    publicHostname: config.publicBaseUrl,
+    publicBaseUrl: connectivity.publicBaseUrl,
+    publicHostname: connectivity.publicHostname,
+    connectivity,
     counts: {
       activeDevices: count('device_credentials', 'WHERE revoked_at IS NULL'),
       backends: count('ai_providers', 'WHERE enabled = 1'),
@@ -228,16 +284,21 @@ function overview(db, config) {
       reminders: count('reminders', 'WHERE completed_at IS NULL')
     },
     stt: { enabled: Boolean(stt.enabled), healthStatus: stt.health_status, status: stt.health_status },
-    cloudflare: {
-      managedExternally: true,
-      publicTarget: 'http://pebble-proxy_api_1:8080',
-      adminPublic: false
-    }
+    cloudflare: connectivity.cloudflare,
+    publicApi: connectivity.publicApi
   };
 }
 
 export function registerAdminRoutes(router, { db, cryptoService, config }) {
   router.add('GET', '/admin/api/overview', (_req, res) => sendJson(res, 200, overview(db, config)));
+  router.add('PUT', '/admin/api/connectivity', async (req, res) => {
+    const input = await readJson(req, config.maxJsonBytes);
+    const publicBaseUrl = normalizePublicBaseUrl(input.publicBaseUrl);
+    db.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+      .run(PUBLIC_BASE_URL_SETTING, publicBaseUrl, nowIso());
+    sendJson(res, 200, { connectivity: connectivityView(db, config) });
+  });
 
   router.add('GET', '/admin/api/devices', (_req, res) => sendJson(res, 200, { devices: listDevices(db) }));
   router.add('POST', '/admin/api/devices', async (req, res) => {

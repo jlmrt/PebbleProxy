@@ -2,8 +2,9 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.2"
+version: "0.1.0-test.3"
 tagline: A private voice and AI gateway for Pebble apps
+icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
   Experimental pre-release. Pebble Proxy gives compatible Pebble apps an authenticated
   gateway for voice uploads, private speech-to-text, OpenAI-compatible assistants, and
@@ -22,4 +23,5 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Creates writable persistent-data directories before services start on Umbrel.
+  Adds community-store icon metadata and public Pebble endpoint setup, and fixes
+  one-time token copying on local Umbrel connections.

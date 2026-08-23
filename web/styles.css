@@ -46,6 +46,7 @@ html {
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   color: var(--text);
   background:
@@ -920,27 +921,77 @@ code {
   border-radius: 10px;
 }
 
-.copy-field code,
-.token-display code {
+.copy-field input,
+.token-display textarea {
   min-width: 0;
   flex: 1;
-  overflow: hidden;
+  width: 100%;
+  padding: 7px 0;
   color: #c7cad2;
-  text-overflow: ellipsis;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.copy-field input {
+  overflow-x: auto;
+  text-overflow: clip;
   white-space: nowrap;
-  font-size: 10px;
 }
 
 .copy-button {
-  min-height: 28px;
-  padding: 0 9px;
+  min-width: 68px;
+  min-height: 44px;
+  padding: 0 13px;
   color: var(--purple-strong);
   background: var(--purple-soft);
   border: 1px solid rgba(143, 109, 246, 0.16);
   border-radius: 7px;
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 730;
   cursor: pointer;
+}
+
+.copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.copy-field-secondary {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.connectivity-form {
+  margin-top: 18px;
+}
+
+.field > label {
+  display: block;
+  margin: 0 0 7px 2px;
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.connectivity-origin-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.connectivity-origin-row input {
+  min-width: 0;
+  flex: 1;
+}
+
+.connectivity-origin-row .button {
+  min-height: 44px;
+  flex: 0 0 auto;
 }
 
 .helper {
@@ -1936,6 +1987,7 @@ code {
 .modal {
   width: min(540px, calc(100vw - 28px));
   max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   padding: 0;
   overflow: visible;
   color: var(--text);
@@ -1959,6 +2011,7 @@ code {
 
 .modal-card {
   max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
   padding: 25px;
   overflow: auto;
   color: var(--text);
@@ -1991,8 +2044,8 @@ code {
 }
 
 .modal-close {
-  width: 31px;
-  height: 31px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
   font-size: 22px;
   line-height: 1;
@@ -2083,9 +2136,16 @@ code {
   text-align: left;
 }
 
-.token-display code {
-  white-space: normal;
-  word-break: break-all;
+.token-display textarea {
+  min-height: 76px;
+  resize: none;
+  overflow-wrap: anywhere;
+}
+
+.token-webhook {
+  margin: 4px 0 18px;
+  padding-top: 2px;
+  text-align: left;
 }
 
 .confirm-check {
@@ -2314,6 +2374,14 @@ code {
   outline-offset: 2px;
 }
 
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+select,
+textarea,
+[contenteditable]:not([contenteditable="false"]) {
+  font-size: 16px;
+  font-size: max(1rem, 16px);
+}
+
 @media (max-width: 1180px) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2440,7 +2508,7 @@ code {
   }
 
   #main-content {
-    padding: 18px 14px 44px;
+    padding: 18px 14px calc(44px + env(safe-area-inset-bottom));
   }
 
   .hero-card {
@@ -2584,7 +2652,16 @@ code {
 
   .modal-card {
     padding: 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
     border-radius: 17px;
+  }
+
+  .connectivity-origin-row {
+    flex-direction: column;
+  }
+
+  .connectivity-origin-row .button {
+    width: 100%;
   }
 
   .modal-actions,
