@@ -24,11 +24,13 @@ for (const file of javascript) {
 }
 
 const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
+const manifest = fs.readFileSync(path.join(root, 'umbrel-app.yml'), 'utf8');
 assert.match(compose, /APP_HOST:\s*pebble-proxy_admin_1/);
 assert.match(compose, /ROLE:\s*public/);
 assert.match(compose, /ROLE:\s*admin/);
 assert.match(compose, /admin_internal:\s*\n\s*internal:\s*true/);
 assert.doesNotMatch(compose, /ports:\s*\n\s*-\s*["']?8080:/, 'Public API must not bind a host port in the Umbrel package');
+assert.match(manifest, /^port:\s*9432$/m, 'Umbrel app port must match the audited public port');
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pebble-proxy-check-'));
 try {

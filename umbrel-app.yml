@@ -14,7 +14,7 @@ website: https://github.com/jlmrt/PebbleProxy
 dependencies: []
 repo: https://github.com/jlmrt/PebbleProxy
 support: https://github.com/jlmrt/PebbleProxy/issues
-port: 3000
+port: 9432
 gallery: []
 path: ""
 defaultUsername: ""
