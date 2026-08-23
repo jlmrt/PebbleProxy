@@ -283,6 +283,9 @@ function connectivityView(db, config) {
       status: 'not_checked',
       serviceUrl: CLOUDFLARED_SERVICE_URL,
       publicTarget: CLOUDFLARED_SERVICE_URL,
+      routeMode: 'internal_container',
+      hostPortPublished: false,
+      adminPort: 9432,
       adminPublic: false
     },
     publicApi: {

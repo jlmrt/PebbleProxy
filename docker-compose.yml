@@ -66,6 +66,8 @@ services:
       PUBLIC_BASE_URL: ${PEBBLE_PROXY_PUBLIC_BASE_URL:-}
       ALLOWED_PUBLIC_HOSTS: ${PEBBLE_PROXY_ALLOWED_HOSTS:-}
       NODE_ENV: production
+    # Intentionally Docker-network-only. Cloudflared reaches this service at
+    # pebble-proxy_api_1:8080; no API port is published on the Umbrel host.
     expose:
       - "8080"
     networks:

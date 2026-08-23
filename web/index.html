@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.4">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.5">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -101,10 +101,19 @@
                 <div class="step-number" aria-hidden="true">1</div>
                 <div class="step-content">
                   <div class="step-heading"><div><span class="eyebrow">Public address</span><h3>Connect the Cloudflare tunnel</h3></div><span class="badge badge-neutral" id="setup-origin-status">Required</span></div>
-                  <p>In the separately installed Cloudflared app, set its Service field to the Docker-only address below. Then enter the public HTTPS hostname Cloudflare gives you.</p>
+                  <p>Use the <strong>Advanced: direct container</strong> route from Radiokot’s Cloudflare Tunnel guide. In Cloudflare, add a <strong>Published application</strong> route and paste the Docker-only Service URL below. Then enter the public HTTPS hostname Cloudflare gives you.</p>
                   <div class="copy-field">
-                    <label for="setup-cloudflare-target">Cloudflared → Service</label>
+                    <label for="setup-cloudflare-target">Published application → Service URL</label>
                     <div><input id="setup-cloudflare-target" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="setup-cloudflare-target">Copy</button></div>
+                  </div>
+                  <div class="route-explanation">
+                    <strong>Why this is not an umbrel.local address</strong>
+                    <dl class="port-map">
+                      <div><dt><code>umbrel.local:9432</code></dt><dd>Umbrel-authenticated admin launcher. Do not tunnel this for Pebble clients.</dd></div>
+                      <div><dt><code>pebble-proxy_admin_1:3000</code></dt><dd>Private admin container behind that launcher.</dd></div>
+                      <div><dt><code>pebble-proxy_api_1:8080</code></dt><dd>Token-protected API container and the correct Cloudflare Service URL.</dd></div>
+                    </dl>
+                    <p>Internal container ports are isolated by container address, so another app can also use its own port 8080 without a collision. No Pebble Proxy API port is opened on the Umbrel host.</p>
                   </div>
                   <form class="connectivity-form" id="setup-connectivity-form">
                     <label class="field"><span>Cloudflare public HTTPS origin</span><div class="connectivity-origin-row"><input id="setup-public-base-url" name="publicBaseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://voice.example.com" required><button class="button button-primary" type="submit">Save origin</button></div><small>Enter only the origin—no path, query, or token.</small></label>
@@ -209,10 +218,10 @@
                 </div>
                 <p class="helper">Pebble Index/CoreApp: paste this into <strong>Webhook URL</strong>, then paste the raw one-time token into <strong>Auth Token</strong>—no <code>Bearer</code> prefix and no custom header. Custom clients may instead use <code>Authorization: Bearer &lt;token&gt;</code>.</p>
                 <div class="copy-field copy-field-secondary">
-                  <label for="cloudflare-service-url">Internal Cloudflared target (Docker only)</label>
+                  <label for="cloudflare-service-url">Published application Service URL (advanced/direct container)</label>
                   <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
                 </div>
-                <p class="helper">Paste this into Cloudflared’s Service field. Port 8080 exists only inside the Pebble Proxy API container; it is not opened on the Umbrel host.</p>
+                <p class="helper">Paste this exact value into Cloudflare’s Published application → Service URL. This is Radiokot’s direct-container route: port 8080 is not opened on the Umbrel host and cannot collide with another container’s internal port. Do not substitute <code>umbrel.local:9432</code>; that is the protected admin UI.</p>
               </article>
 
               <article class="panel">
@@ -471,7 +480,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.4" defer></script>
-    <script src="/app.js?v=0.1.0-test.4" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.5" defer></script>
+    <script src="/app.js?v=0.1.0-test.5" defer></script>
   </body>
 </html>

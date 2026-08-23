@@ -30,9 +30,11 @@ assert.match(compose, /APP_HOST:\s*pebble-proxy_admin_1/);
 assert.match(compose, /ROLE:\s*public/);
 assert.match(compose, /ROLE:\s*admin/);
 assert.match(compose, /admin_internal:\s*\n\s*internal:\s*true/);
-assert.doesNotMatch(compose, /ports:\s*\n\s*-\s*["']?8080:/, 'Public API must not bind a host port in the Umbrel package');
-assert.match(manifest, /^port:\s*9432$/m, 'Umbrel app port must match the audited public port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.4["']$/m);
+assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a raw host port');
+assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
+  'Public API port 8080 must remain Docker-network-only');
+assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.5["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -42,6 +44,7 @@ const browserStyles = fs.readFileSync(path.join(root, 'web/styles.css'), 'utf8')
 assert.match(html, /id="pebble-webhook-url"/);
 assert.match(html, /id="page-setup"/);
 assert.match(html, /X-Widget-Token/);
+assert.match(html, /umbrel\.local:9432<\/code>[\s\S]*?Do not tunnel this for Pebble clients/);
 assert.match(html, /id="tts-form"/);
 assert.match(html, /id="new-device-token"[^>]*readonly/);
 assert.match(html, /src="\/clipboard\.js/);

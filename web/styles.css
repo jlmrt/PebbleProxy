@@ -1206,6 +1206,57 @@ code {
   margin-top: 17px;
 }
 
+.route-explanation {
+  margin-top: 12px;
+  padding: 13px 14px;
+  color: var(--muted-strong);
+  background: rgba(82, 211, 139, 0.045);
+  border: 1px solid rgba(82, 211, 139, 0.13);
+  border-radius: 11px;
+}
+
+.route-explanation strong {
+  display: block;
+  font-size: 10px;
+}
+
+.route-explanation p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.port-map {
+  display: grid;
+  gap: 0;
+  margin: 9px 0 0;
+}
+
+.port-map > div {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.65fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid rgba(82, 211, 139, 0.1);
+}
+
+.port-map dt,
+.port-map dd {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.port-map dd {
+  color: var(--muted);
+}
+
+.route-explanation code {
+  color: #bceccc;
+  overflow-wrap: anywhere;
+}
+
 .client-guide-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2773,6 +2824,11 @@ textarea,
   .step-heading {
     flex-direction: column;
     gap: 9px;
+  }
+
+  .port-map > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .field-grid,

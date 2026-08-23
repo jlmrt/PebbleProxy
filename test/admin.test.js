@@ -66,6 +66,9 @@ test('admin exposes and persists exact public client endpoints', async (t) => {
   const initial = await dispatch(app.router, 'GET', '/admin/api/overview');
   assert.equal(initial.body.publicBaseUrl, 'https://pebble.example');
   assert.equal(initial.body.connectivity.cloudflare.serviceUrl, 'http://pebble-proxy_api_1:8080');
+  assert.equal(initial.body.connectivity.cloudflare.routeMode, 'internal_container');
+  assert.equal(initial.body.connectivity.cloudflare.hostPortPublished, false);
+  assert.equal(initial.body.connectivity.cloudflare.adminPort, 9432);
   assert.equal(initial.body.connectivity.publicApi.webhookUrl, 'https://pebble.example/webhooks/index');
   assert.equal(initial.body.connectivity.publicApi.openAiBaseUrl, 'https://pebble.example/v1');
   assert.equal(initial.body.connectivity.publicApi.mcpUrl, 'https://pebble.example/mcp');
