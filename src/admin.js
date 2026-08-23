@@ -3,6 +3,7 @@ import { createDevice, listDevices, resetDeviceSessions, revokeDevice } from './
 import { HttpError, readJson, sendJson, safeJson } from './http.js';
 import { nowIso } from './db.js';
 import { checkSttHealth } from './recordings.js';
+import { checkTtsHealth } from './tts.js';
 import {
   joinBackendUrl,
   parseBackendBaseUrl,
@@ -153,9 +154,36 @@ function sttView(row) {
   };
 }
 
+function ttsView(row) {
+  return {
+    providerType: row.provider_type,
+    baseUrl: row.base_url,
+    speechPath: row.speech_path,
+    voicesPath: row.voices_path,
+    healthPath: row.health_path,
+    model: row.model,
+    voice: row.voice,
+    responseFormat: row.response_format,
+    hasCredential: Boolean(row.encrypted_credential),
+    enabled: Boolean(row.enabled),
+    revision: row.revision,
+    healthStatus: row.health_status,
+    status: row.health_status,
+    lastHealthAt: row.last_health_at,
+    lastError: row.last_error,
+    updatedAt: row.updated_at
+  };
+}
+
 export async function testStt(db, cryptoService, config) {
   const started = Date.now();
   const result = await checkSttHealth({ db, cryptoService, config }, { force: true });
+  return { ok: result.status === 'healthy', ...result, latencyMs: Date.now() - started };
+}
+
+export async function testTts(db, cryptoService, config) {
+  const started = Date.now();
+  const result = await checkTtsHealth({ db, cryptoService, config }, { force: true });
   return { ok: result.status === 'healthy', ...result, latencyMs: Date.now() - started };
 }
 
@@ -176,6 +204,7 @@ export function startHealthWorker({ db, cryptoService, config, log = () => {} })
       for (const item of requested) {
         const target = item.key.slice('health_request:'.length);
         if (target === 'stt') await testStt(db, cryptoService, config);
+        else if (target === 'tts') await testTts(db, cryptoService, config);
         else if (target.startsWith('provider:')) {
           const provider = db.prepare('SELECT * FROM ai_providers WHERE id = ?').get(target.slice('provider:'.length));
           if (provider) await testProvider(db, cryptoService, provider, config);
@@ -189,6 +218,8 @@ export function startHealthWorker({ db, cryptoService, config, log = () => {} })
       for (const provider of staleProviders) await testProvider(db, cryptoService, provider, config);
       const stt = db.prepare('SELECT * FROM stt_config WHERE id = 1 AND enabled = 1').get();
       if (stt && (!stt.last_health_at || stt.last_health_at < cutoff)) await testStt(db, cryptoService, config);
+      const tts = db.prepare('SELECT * FROM tts_config WHERE id = 1 AND enabled = 1').get();
+      if (tts && (!tts.last_health_at || tts.last_health_at < cutoff)) await testTts(db, cryptoService, config);
     } catch (error) {
       log('error', 'health_worker_failed', { error: error?.message });
     } finally {
@@ -267,6 +298,7 @@ function connectivityView(db, config) {
 function overview(db, config) {
   const count = (table, where = '') => db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count;
   const stt = db.prepare('SELECT health_status, enabled FROM stt_config WHERE id = 1').get();
+  const tts = db.prepare('SELECT health_status, enabled FROM tts_config WHERE id = 1').get();
   const connectivity = connectivityView(db, config);
   return {
     version: '0.1.0',
@@ -284,6 +316,7 @@ function overview(db, config) {
       reminders: count('reminders', 'WHERE completed_at IS NULL')
     },
     stt: { enabled: Boolean(stt.enabled), healthStatus: stt.health_status, status: stt.health_status },
+    tts: { enabled: Boolean(tts.enabled), healthStatus: tts.health_status, status: tts.health_status },
     cloudflare: connectivity.cloudflare,
     publicApi: connectivity.publicApi
   };
@@ -441,6 +474,44 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
   router.add('POST', '/admin/api/stt/test', async (_req, res) => {
     scheduleHealthCheck(db, 'stt');
     sendJson(res, 202, { ok: false, scheduled: true, status: 'pending', message: 'Speech-to-text health check scheduled' });
+  });
+
+  router.add('GET', '/admin/api/tts', (_req, res) => {
+    const tts = ttsView(db.prepare('SELECT * FROM tts_config WHERE id = 1').get());
+    sendJson(res, 200, { tts, health: { status: tts.healthStatus, checkedAt: tts.lastHealthAt, error: tts.lastError, model: tts.model, voice: tts.voice } });
+  });
+  router.add('PUT', '/admin/api/tts', async (req, res) => {
+    const raw = await readJson(req, config.maxJsonBytes);
+    const current = db.prepare('SELECT * FROM tts_config WHERE id = 1').get();
+    const providerType = String(raw.providerType || raw.provider || current.provider_type).toLowerCase();
+    if (providerType !== 'kokoro') throw new HttpError(400, 'invalid_tts_type', 'Unsupported text-to-speech provider type');
+    const base = parseBackendBaseUrl(raw.baseUrl || current.base_url);
+    const model = String(raw.model || current.model).trim();
+    const voice = String(raw.voice || current.voice).trim();
+    const responseFormat = String(raw.responseFormat || current.response_format).trim().toLowerCase();
+    if (!model || model.length > 100) throw new HttpError(400, 'invalid_tts_model', 'TTS model is required');
+    if (!/^[A-Za-z0-9_+().-]{1,200}$/.test(voice)) throw new HttpError(400, 'invalid_tts_voice', 'TTS voice contains unsupported characters');
+    if (!['mp3', 'wav', 'opus', 'flac', 'aac', 'pcm'].includes(responseFormat)) {
+      throw new HttpError(400, 'invalid_tts_format', 'Unsupported TTS audio format');
+    }
+    const rawCredential = validatedCredential(raw.credential);
+    const credential = raw.clearCredential === true
+      ? null
+      : rawCredential ? cryptoService.encrypt(rawCredential) : current.encrypted_credential;
+    db.prepare(`UPDATE tts_config SET provider_type = ?, base_url = ?, speech_path = ?, voices_path = ?,
+      health_path = ?, model = ?, voice = ?, response_format = ?, encrypted_credential = ?, enabled = ?,
+      revision = revision + 1, health_status = 'unknown', last_error = NULL, updated_at = ? WHERE id = 1`)
+      .run(providerType, base.toString().replace(/\/$/, ''),
+        validateEndpointPath(raw.speechPath || current.speech_path, 'Speech path'),
+        validateEndpointPath(raw.voicesPath || current.voices_path, 'Voices path'),
+        validateEndpointPath(raw.healthPath || current.health_path, 'Health path'),
+        model, voice, responseFormat, credential,
+        boolean(raw.enabled, Boolean(current.enabled)) ? 1 : 0, nowIso());
+    sendJson(res, 200, { tts: ttsView(db.prepare('SELECT * FROM tts_config WHERE id = 1').get()) });
+  });
+  router.add('POST', '/admin/api/tts/test', async (_req, res) => {
+    scheduleHealthCheck(db, 'tts');
+    sendJson(res, 202, { ok: false, scheduled: true, status: 'pending', message: 'Text-to-speech health check scheduled' });
   });
 
   router.add('GET', '/admin/api/notes', (_req, res) => {

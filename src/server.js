@@ -10,6 +10,7 @@ import { HttpError, Router, cleanError, requestId, sendJson, sendOpenAiError, se
 import { registerAiRoutes } from './ai.js';
 import { registerMcpRoutes } from './mcp.js';
 import { registerRecordingRoutes, startSttWorker } from './recordings.js';
+import { registerTtsRoutes } from './tts.js';
 import { registerAdminRoutes, startHealthWorker } from './admin.js';
 import { adminMutationAllowed } from './security.js';
 
@@ -26,7 +27,7 @@ function publicCorsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Pebble-Session, Idempotency-Key, MCP-Protocol-Version',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Widget-Token, X-Pebble-Token, X-Webhook-Token, X-Pebble-Session, Idempotency-Key, MCP-Protocol-Version',
     'Access-Control-Expose-Headers': 'X-Request-Id, Retry-After, MCP-Protocol-Version',
     'Access-Control-Max-Age': '86400'
   };
@@ -96,6 +97,7 @@ export function createApplication(overrides = {}) {
   registerAiRoutes(publicRouter, deps);
   registerMcpRoutes(publicRouter, deps);
   registerRecordingRoutes(publicRouter, adminRouter, deps);
+  registerTtsRoutes(publicRouter, deps);
   registerAdminRoutes(adminRouter, deps);
 
   const assets = staticAssets();

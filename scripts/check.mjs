@@ -32,7 +32,7 @@ assert.match(compose, /ROLE:\s*admin/);
 assert.match(compose, /admin_internal:\s*\n\s*internal:\s*true/);
 assert.doesNotMatch(compose, /ports:\s*\n\s*-\s*["']?8080:/, 'Public API must not bind a host port in the Umbrel package');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel app port must match the audited public port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.3["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.4["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -40,7 +40,9 @@ const html = fs.readFileSync(path.join(root, 'web/index.html'), 'utf8');
 const browserScript = fs.readFileSync(path.join(root, 'web/app.js'), 'utf8');
 const browserStyles = fs.readFileSync(path.join(root, 'web/styles.css'), 'utf8');
 assert.match(html, /id="pebble-webhook-url"/);
-assert.match(html, /Authorization<\/code> with the value <code>Bearer &lt;one-time device token&gt;/);
+assert.match(html, /id="page-setup"/);
+assert.match(html, /X-Widget-Token/);
+assert.match(html, /id="tts-form"/);
 assert.match(html, /id="new-device-token"[^>]*readonly/);
 assert.match(html, /src="\/clipboard\.js/);
 assert.match(browserScript, /PebbleClipboard\.copyText/);
@@ -63,6 +65,7 @@ try {
   assert.equal(cryptoService.decrypt(boxed), 'secret');
   assert.ok(db.prepare("SELECT id FROM agent_profiles WHERE id = 'pebble'").get());
   assert.ok(db.prepare('SELECT id FROM stt_config WHERE id = 1').get());
+  assert.ok(db.prepare('SELECT id FROM tts_config WHERE id = 1').get());
   db.close();
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });

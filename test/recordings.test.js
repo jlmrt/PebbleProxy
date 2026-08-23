@@ -112,8 +112,8 @@ async function fixture(t, overrides = {}) {
   const publicRouter = new Router();
   const adminRouter = new Router();
   const authCalls = [];
-  const authenticate = async (req, scope) => {
-    authCalls.push(scope);
+  const authenticate = async (req, scope, options = {}) => {
+    authCalls.push({ scope, options });
     return { id: req.headers['x-test-device-id'] || 'device-1', scopes: ['webhook:write'], aliases: [] };
   };
   const deps = { db, cryptoService, config, authenticate, fetchImpl: (...args) => globalThis.fetch(...args) };
@@ -161,7 +161,7 @@ test('Index webhook is bounded, authenticated, idempotent, and manageable throug
   assert.equal(created.statusCode, 202);
   assert.equal(created.json.state, 'received');
   assert.equal(created.json.deduplicated, false);
-  assert.deepEqual(app.authCalls, ['webhook:write']);
+  assert.deepEqual(app.authCalls, [{ scope: 'webhook:write', options: { allowWebhookHeaders: true } }]);
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM recordings').get().count, 1);
   assert.equal(app.db.prepare('SELECT recorded_at FROM recordings').get().recorded_at, '2026-08-22T12:34:56.000Z');
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcription_jobs').get().count, 1);

@@ -148,6 +148,22 @@ test('admin configures private STT without revealing credentials and queues heal
   assert.equal(app.db.prepare("SELECT value FROM settings WHERE key = 'health_request:stt'").get().value, 'pending');
 });
 
+test('admin configures the official Umbrel Kokoro service and queues health checks', async (t) => {
+  const app = fixture(t);
+  const updated = await dispatch(app.router, 'PUT', '/admin/api/tts', {
+    providerType: 'kokoro', baseUrl: 'http://kokoro_web_1:8880',
+    speechPath: '/v1/audio/speech', voicesPath: '/v1/audio/voices', healthPath: '/health',
+    model: 'kokoro', voice: 'af_heart', responseFormat: 'mp3', enabled: true
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.tts.enabled, true);
+  assert.equal(updated.body.tts.baseUrl, 'http://kokoro_web_1:8880');
+  assert.equal(updated.body.tts.speechPath, '/v1/audio/speech');
+  const scheduled = await dispatch(app.router, 'POST', '/admin/api/tts/test');
+  assert.equal(scheduled.status, 202);
+  assert.equal(app.db.prepare("SELECT value FROM settings WHERE key = 'health_request:tts'").get().value, 'pending');
+});
+
 test('admin organizer actions share the same device-scoped MCP data', async (t) => {
   const app = fixture(t);
   const created = await dispatch(app.router, 'POST', '/admin/api/devices', { name: 'Organizer device', scopes: ['mcp:invoke'] });

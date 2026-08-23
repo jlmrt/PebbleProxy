@@ -414,7 +414,7 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
   cleanupAudioTombstones(config.recordingsDir);
 
   publicRouter.add('POST', '/webhooks/index', async (req, res) => {
-    const device = await authenticate(req, 'webhook:write');
+    const device = await authenticate(req, 'webhook:write', { allowWebhookHeaders: true });
     if (!device?.id) throw new HttpError(401, 'invalid_token', 'Authentication failed');
     const lease = limiter?.acquire ? await limiter.acquire(device) : null;
     try {

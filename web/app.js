@@ -3,6 +3,11 @@
 
   const API_ROOT = "/admin/api";
   const ROUTES = {
+    setup: {
+      title: "Guided setup",
+      subtitle: "Connect Pebble Index, a watch app, or another trusted client.",
+      load: loadSetup,
+    },
     overview: {
       title: "Overview",
       subtitle: "Your private bridge between Pebble and Umbrel.",
@@ -19,8 +24,8 @@
       load: loadBackends,
     },
     speech: {
-      title: "Speech to text",
-      subtitle: "Private asynchronous transcription on Umbrel.",
+      title: "Speech services",
+      subtitle: "Private transcription with LocalAI and spoken audio with Kokoro.",
       load: loadSpeech,
     },
     recordings: {
@@ -74,6 +79,9 @@
     pollTimer: null,
     publicBaseUrl: "",
     publicWebhookUrl: "",
+    publicOpenAiBaseUrl: "",
+    publicMcpUrl: "",
+    activeDeviceCount: 0,
   };
 
   class ApiError extends Error {
@@ -548,15 +556,28 @@
     );
     const publicHostname = first(connectivity, ["publicHostname", "public_hostname", "hostname"], publicBaseUrl);
     const webhookUrl = plainText(first(publicApi, ["webhookUrl", "webhook_url"], publicBaseUrl ? `${publicBaseUrl}/webhooks/index` : ""), "");
+    const openAiBaseUrl = plainText(first(publicApi, ["openAiBaseUrl", "open_ai_base_url"], publicBaseUrl ? `${publicBaseUrl}/v1` : ""), "");
+    const mcpUrl = plainText(first(publicApi, ["mcpUrl", "mcp_url"], publicBaseUrl ? `${publicBaseUrl}/mcp` : ""), "");
     state.publicBaseUrl = publicBaseUrl;
     state.publicWebhookUrl = webhookUrl;
+    state.publicOpenAiBaseUrl = openAiBaseUrl;
+    state.publicMcpUrl = mcpUrl;
     $("#public-hostname").textContent = publicHostname ? plainText(publicHostname) : "Set your public HTTPS origin below";
     $("#public-base-url").value = publicBaseUrl;
     setCopyField($("#pebble-webhook-url"), webhookUrl);
+    $("#setup-public-base-url").value = publicBaseUrl;
+    setCopyField($("#setup-index-webhook-url"), webhookUrl);
+    setCopyField($("#setup-openai-base-url"), openAiBaseUrl);
+    $("#setup-mcp-url").textContent = mcpUrl || "Complete step 1";
+    const originStatus = $("#setup-origin-status");
+    originStatus.className = `badge ${publicBaseUrl ? "badge-success" : "badge-neutral"}`;
+    originStatus.textContent = publicBaseUrl ? "Complete" : "Required";
+    $("#setup-step-origin").classList.toggle("complete", Boolean(publicBaseUrl));
 
     const cloudflare = objectFrom(first(connectivity, ["cloudflare", "tunnel"], first(overview, ["cloudflare"], {})));
     const serviceUrl = plainText(first(cloudflare, ["serviceUrl", "service_url", "publicTarget", "public_target"], "http://pebble-proxy_api_1:8080"));
     setCopyField($("#cloudflare-service-url"), serviceUrl);
+    setCopyField($("#setup-cloudflare-target"), serviceUrl);
     const tunnelStatus = normalizeStatus(first(cloudflare, ["status", "health"], "unknown"));
     const tunnelLabel = tunnelStatus === "healthy"
       ? "Connected"
@@ -576,6 +597,32 @@
     publicBadge.replaceWith(replacement);
   }
 
+  function renderSetupStatus() {
+    const hasOrigin = Boolean(state.publicBaseUrl);
+    const hasDevice = state.activeDeviceCount > 0;
+    const status = $("#setup-status");
+    const tokenStatus = $("#setup-token-status");
+    tokenStatus.className = `badge ${hasDevice ? "badge-success" : "badge-neutral"}`;
+    tokenStatus.textContent = hasDevice ? "Complete" : "Required";
+    $("#setup-step-token").classList.toggle("complete", hasDevice);
+    const complete = Number(hasOrigin) + Number(hasDevice);
+    status.className = `badge ${complete === 2 ? "badge-success" : complete ? "badge-warning" : "badge-neutral"}`;
+    status.textContent = complete === 2 ? "Ready to test" : `${complete} of 2 ready`;
+  }
+
+  async function loadSetup() {
+    try {
+      const [overviewResponse, devicesResponse] = await Promise.all([api("/overview"), api("/devices")]);
+      const overview = objectFrom(overviewResponse, ["overview"]);
+      state.devices = listFrom(devicesResponse, ["devices"]);
+      state.activeDeviceCount = state.devices.filter((device) => !first(device, ["revokedAt", "revoked_at"])).length;
+      renderConnectivity(overview);
+      renderSetupStatus();
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  }
+
   async function saveConnectivity(form, submitter) {
     setBusy(submitter, true, "Saving…");
     try {
@@ -584,6 +631,7 @@
         body: { publicBaseUrl: form.elements.publicBaseUrl.value },
       });
       renderConnectivity(response);
+      renderSetupStatus();
       toast("Public client URLs saved.", "success");
     } catch (error) {
       toast(error.message, "error");
@@ -616,6 +664,7 @@
 
     const counts = objectFrom(first(overview, ["counts", "totals"], {}));
     const deviceCount = Number(first(counts, ["devices", "activeDevices", "active_devices"], first(overview, ["deviceCount", "devices"], 0))) || 0;
+    state.activeDeviceCount = deviceCount;
     const recordingCount = Number(first(counts, ["recordings", "voiceRecordings", "voice_recordings"], first(overview, ["recordingCount"], 0))) || 0;
     const backendCount = Number(first(counts, ["backends", "aiBackends", "ai_backends"], first(overview, ["backendCount"], 0))) || 0;
     const stt = objectFrom(first(overview, ["stt", "speechToText", "speech_to_text"], {}));
@@ -749,6 +798,8 @@
         $("#token-saved").checked = false;
         $("#close-token-dialog").disabled = true;
         showDialog($("#token-dialog"));
+        state.activeDeviceCount += 1;
+        renderSetupStatus();
       } else {
         toast("Device created, but the server did not return a one-time token.", "warning", 6500);
       }
@@ -976,15 +1027,40 @@
   }
 
   async function loadSpeech() {
-    try {
-      const response = await api("/stt");
-      const settings = objectFrom(response, ["settings", "stt", "provider"]);
+    const [sttResult, ttsResult] = await Promise.allSettled([api("/stt"), api("/tts")]);
+    if (sttResult.status === "fulfilled") {
+      const settings = objectFrom(sttResult.value, ["settings", "stt", "provider"]);
       fillSttForm(settings);
-      const health = objectFrom(first(response, ["health", "providerHealth", "provider_health"], first(settings, ["health"], {})), ["health"]);
-      renderSttHealth(health);
-    } catch (error) {
-      renderSttHealth({ status: "error", message: error.message });
-      toast(error.message, "error");
+      renderSttHealth(sttHealthFromResponse(sttResult.value));
+    } else {
+      renderSttHealth({ status: "error", message: sttResult.reason.message });
+      toast(sttResult.reason.message, "error");
+    }
+    if (ttsResult.status === "fulfilled") {
+      const settings = objectFrom(ttsResult.value, ["settings", "tts", "provider"]);
+      fillTtsForm(settings);
+      renderTtsHealth(ttsHealthFromResponse(ttsResult.value));
+    } else {
+      renderTtsHealth({ status: "error", message: ttsResult.reason.message });
+      toast(ttsResult.reason.message, "error");
+    }
+  }
+
+  function fillTtsForm(settings) {
+    if (!settings || typeof settings !== "object") return;
+    $("#tts-enabled").checked = Boolean(first(settings, ["enabled"], false));
+    const mappings = [
+      ["#tts-base-url", ["baseUrl", "base_url"]],
+      ["#tts-speech-path", ["speechPath", "speech_path"]],
+      ["#tts-voices-path", ["voicesPath", "voices_path"]],
+      ["#tts-health-path", ["healthPath", "health_path"]],
+      ["#tts-model", ["model"]],
+      ["#tts-voice", ["voice"]],
+      ["#tts-response-format", ["responseFormat", "response_format"]],
+    ];
+    for (const [selector, keys] of mappings) {
+      const value = first(settings, keys);
+      if (value !== undefined && value !== null && String(value) !== "") $(selector).value = String(value);
     }
   }
 
@@ -1043,6 +1119,41 @@
     details.replaceChildren(...pairs.map(([term, value]) => node("div", { class: "detail-pair" }, node("dt", { text: term }), node("dd", { text: value }))));
   }
 
+  function renderTtsHealth(health) {
+    const status = normalizeStatus(first(health, ["status", "state"], first(health, ["ok", "healthy"], false) ? "healthy" : "unknown"));
+    const dot = $("#tts-health-dot");
+    const label = $("#tts-health-label");
+    const orb = $("#tts-health-orb");
+    dot.className = "status-dot";
+    orb.className = "health-orb";
+    if (status === "healthy") {
+      dot.classList.add("status-healthy");
+      orb.classList.add("healthy");
+      label.textContent = "Healthy";
+      $("#tts-health-title").textContent = "Kokoro is ready";
+    } else if (status === "error") {
+      dot.classList.add("status-error");
+      orb.classList.add("error");
+      label.textContent = "Unavailable";
+      $("#tts-health-title").textContent = "Kokoro needs attention";
+    } else if (["degraded", "starting", "pending"].includes(status)) {
+      dot.classList.add("status-degraded");
+      label.textContent = "Checking";
+      $("#tts-health-title").textContent = "Checking Kokoro";
+    } else {
+      dot.classList.add("status-unknown");
+      label.textContent = "Not checked";
+      $("#tts-health-title").textContent = "Waiting for a health check";
+    }
+    $("#tts-health-message").textContent = plainText(first(health, ["message", "detail", "error"], status === "healthy" ? "The private speech service is accepting work." : "Install Kokoro, save the preset, then test the private connection."));
+    const pairs = [
+      ["Last checked", formatDate(first(health, ["checkedAt", "checked_at", "lastCheckedAt", "last_checked_at"]))],
+      ["Model", plainText(first(health, ["model"]))],
+      ["Voice", plainText(first(health, ["voice"]))],
+    ];
+    $("#tts-health-details").replaceChildren(...pairs.map(([term, value]) => node("div", { class: "detail-pair" }, node("dt", { text: term }), node("dd", { text: value }))));
+  }
+
   async function saveStt(form, submitter) {
     const data = new FormData(form);
     setBusy(submitter, true, "Saving…");
@@ -1071,6 +1182,30 @@
     }
   }
 
+  async function saveTts(form, submitter) {
+    const data = new FormData(form);
+    setBusy(submitter, true, "Saving…");
+    try {
+      await apiWithMethodFallback("/tts", {
+        enabled: data.get("enabled") === "on",
+        provider: "kokoro",
+        baseUrl: plainText(data.get("baseUrl"), ""),
+        speechPath: plainText(data.get("speechPath"), "/v1/audio/speech"),
+        voicesPath: plainText(data.get("voicesPath"), "/v1/audio/voices"),
+        healthPath: plainText(data.get("healthPath"), "/health"),
+        model: plainText(data.get("model"), "kokoro"),
+        voice: plainText(data.get("voice"), "af_heart"),
+        responseFormat: plainText(data.get("responseFormat"), "mp3"),
+      });
+      toast("Kokoro text-to-speech settings saved.", "success");
+      await loadSpeech();
+    } catch (error) {
+      toast(error.message, "error", 6000);
+    } finally {
+      setBusy(submitter, false);
+    }
+  }
+
   function sttHealthFromResponse(response) {
     const settings = objectFrom(response, ["settings", "stt", "provider"]);
     return objectFrom(first(response, ["health", "providerHealth", "provider_health"], {
@@ -1078,6 +1213,17 @@
       checkedAt: first(settings, ["lastHealthAt", "last_health_at"]),
       error: first(settings, ["lastError", "last_error"]),
       model: first(settings, ["model"]),
+    }), ["health"]);
+  }
+
+  function ttsHealthFromResponse(response) {
+    const settings = objectFrom(response, ["settings", "tts", "provider"]);
+    return objectFrom(first(response, ["health", "providerHealth", "provider_health"], {
+      status: first(settings, ["healthStatus", "health_status", "status"], "unknown"),
+      checkedAt: first(settings, ["lastHealthAt", "last_health_at"]),
+      error: first(settings, ["lastError", "last_error"]),
+      model: first(settings, ["model"]),
+      voice: first(settings, ["voice"]),
     }), ["health"]);
   }
 
@@ -1134,6 +1280,39 @@
       toast(lastPollError ? `Health check timed out: ${lastPollError.message}` : "The health check is still pending. Try again in a moment.", "warning", 7000);
     } catch (error) {
       renderSttHealth({ status: "error", message: error.message, checkedAt: new Date().toISOString() });
+      toast(error.message, "error", 6000);
+    } finally {
+      setBusy(button, false);
+    }
+  }
+
+  async function testTts(button) {
+    setBusy(button, true, "Testing…");
+    try {
+      const initialResponse = await api("/tts");
+      const initialHealth = ttsHealthFromResponse(initialResponse);
+      const baselineStatus = plainText(first(initialHealth, ["status", "state"], "unknown"), "unknown").toLowerCase();
+      const baselineCheckedAt = plainText(first(initialHealth, ["checkedAt", "checked_at"]), "");
+      await api("/tts/test", { method: "POST", body: {} });
+      renderTtsHealth({ status: "pending", message: "The private Kokoro health check is running…", model: first(initialHealth, ["model"]), voice: first(initialHealth, ["voice"]) });
+      const deadline = Date.now() + 30000;
+      let latestHealth = initialHealth;
+      while (Date.now() < deadline) {
+        await wait(1000);
+        const currentResponse = await api("/tts", { timeout: 7000 });
+        latestHealth = ttsHealthFromResponse(currentResponse);
+        const currentStatus = plainText(first(latestHealth, ["status", "state"], "unknown"), "unknown").toLowerCase();
+        const currentCheckedAt = plainText(first(latestHealth, ["checkedAt", "checked_at"]), "");
+        if (currentStatus === baselineStatus && (!currentCheckedAt || currentCheckedAt === baselineCheckedAt)) continue;
+        renderTtsHealth(latestHealth);
+        const healthy = normalizeStatus(currentStatus) === "healthy";
+        toast(healthy ? "Kokoro is healthy." : apiMessage(latestHealth, "Kokoro is not ready."), healthy ? "success" : "warning", 6000);
+        return;
+      }
+      renderTtsHealth(latestHealth);
+      toast("The Kokoro health check is still pending. Try again in a moment.", "warning", 7000);
+    } catch (error) {
+      renderTtsHealth({ status: "error", message: error.message, checkedAt: new Date().toISOString() });
       toast(error.message, "error", 6000);
     } finally {
       setBusy(button, false);
@@ -1548,6 +1727,7 @@
     $("#recording-status").addEventListener("change", renderRecordings);
 
     $("#open-device-dialog").addEventListener("click", () => showDialog($("#device-dialog")));
+    $("#setup-create-token").addEventListener("click", () => showDialog($("#device-dialog")));
     $("#open-backend-dialog").addEventListener("click", () => {
       $("#backend-form").reset();
       applyBackendPreset("openclaw");
@@ -1589,9 +1769,11 @@
     }
     $("#backend-auth-type").addEventListener("change", updateBackendAuthFields);
     $("#test-stt").addEventListener("click", (event) => testStt(event.currentTarget));
+    $("#test-tts").addEventListener("click", (event) => testTts(event.currentTarget));
 
     bindFormDialog("#device-form", createDevice);
     bindFormDialog("#connectivity-form", saveConnectivity);
+    bindFormDialog("#setup-connectivity-form", saveConnectivity);
     bindFormDialog("#backend-form", createBackend);
     bindFormDialog("#alias-form", createAlias);
     bindFormDialog("#note-form", createNote);
@@ -1601,6 +1783,11 @@
       event.preventDefault();
       if (!event.currentTarget.reportValidity()) return;
       saveStt(event.currentTarget, event.submitter).catch((error) => toast(error.message, "error"));
+    });
+    $("#tts-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!event.currentTarget.reportValidity()) return;
+      saveTts(event.currentTarget, event.submitter).catch((error) => toast(error.message, "error"));
     });
 
     document.addEventListener("visibilitychange", () => {

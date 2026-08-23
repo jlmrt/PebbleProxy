@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.3">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.4">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -25,6 +25,10 @@
         </div>
 
         <nav class="nav-list">
+          <a class="nav-item" href="#setup" data-route="setup">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 1 3 3v1.1a7 7 0 0 1 1.4.8l1-.58a3 3 0 0 1 4.1 1.1 3 3 0 0 1-1.1 4.1l-.95.55a7.3 7.3 0 0 1 0 1.86l.95.55a3 3 0 1 1-3 5.2l-1-.58a7 7 0 0 1-1.4.8V21a3 3 0 1 1-6 0v-1.1a7 7 0 0 1-1.4-.8l-1 .58a3 3 0 1 1-3-5.2l.95-.55a7.3 7.3 0 0 1 0-1.86l-.95-.55a3 3 0 1 1 3-5.2l1 .58a7 7 0 0 1 1.4-.8V5a3 3 0 0 1 3-3Zm0 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
+            <span>Guided setup</span>
+          </a>
           <a class="nav-item" href="#overview" data-route="overview">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"/></svg>
             <span>Overview</span>
@@ -39,7 +43,7 @@
           </a>
           <a class="nav-item" href="#speech" data-route="speech">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm-5-3a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.93V21h-2v-3.07A7 7 0 0 1 5 11h2Z"/></svg>
-            <span>Speech to text</span>
+            <span>Speech services</span>
           </a>
           <a class="nav-item" href="#recordings" data-route="recordings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg>
@@ -86,6 +90,69 @@
         </header>
 
         <main id="main-content" tabindex="-1">
+          <section class="page" id="page-setup" data-page="setup" hidden>
+            <div class="section-toolbar">
+              <div><h2>Connect your Pebble</h2><p>Follow these steps in order. Every value below says exactly where it belongs.</p></div>
+              <span class="badge badge-neutral" id="setup-status">Not started</span>
+            </div>
+
+            <ol class="setup-steps">
+              <li class="setup-step" id="setup-step-origin">
+                <div class="step-number" aria-hidden="true">1</div>
+                <div class="step-content">
+                  <div class="step-heading"><div><span class="eyebrow">Public address</span><h3>Connect the Cloudflare tunnel</h3></div><span class="badge badge-neutral" id="setup-origin-status">Required</span></div>
+                  <p>In the separately installed Cloudflared app, set its Service field to the Docker-only address below. Then enter the public HTTPS hostname Cloudflare gives you.</p>
+                  <div class="copy-field">
+                    <label for="setup-cloudflare-target">Cloudflared → Service</label>
+                    <div><input id="setup-cloudflare-target" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="setup-cloudflare-target">Copy</button></div>
+                  </div>
+                  <form class="connectivity-form" id="setup-connectivity-form">
+                    <label class="field"><span>Cloudflare public HTTPS origin</span><div class="connectivity-origin-row"><input id="setup-public-base-url" name="publicBaseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://voice.example.com" required><button class="button button-primary" type="submit">Save origin</button></div><small>Enter only the origin—no path, query, or token.</small></label>
+                  </form>
+                </div>
+              </li>
+
+              <li class="setup-step" id="setup-step-token">
+                <div class="step-number" aria-hidden="true">2</div>
+                <div class="step-content">
+                  <div class="step-heading"><div><span class="eyebrow">Device credential</span><h3>Create a separate token</h3></div><span class="badge badge-neutral" id="setup-token-status">Required</span></div>
+                  <p>Create one token per ring, watch, or app. For Pebble Index, keep <strong>Voice webhook</strong> enabled. The token appears once and the next screen shows exactly where to paste it.</p>
+                  <button class="button button-primary" id="setup-create-token" type="button">Create device token</button>
+                </div>
+              </li>
+
+              <li class="setup-step" id="setup-step-client">
+                <div class="step-number" aria-hidden="true">3</div>
+                <div class="step-content">
+                  <div class="step-heading"><div><span class="eyebrow">Client settings</span><h3>Choose what you are connecting</h3></div></div>
+                  <div class="client-guide-grid">
+                    <article class="client-guide-card">
+                      <span class="client-type">Pebble Index / CoreApp</span>
+                      <h4>Use CoreApp’s two built-in fields</h4>
+                      <div class="copy-field"><label for="setup-index-webhook-url">Index Settings → Webhook → Webhook URL</label><div><input id="setup-index-webhook-url" type="text" readonly spellcheck="false" placeholder="Complete step 1"><button type="button" class="copy-button" data-copy-target="setup-index-webhook-url" disabled>Copy</button></div></div>
+                      <dl class="placement-list"><div><dt>Auth Token</dt><dd>Paste the raw <code>pp_…</code> token, without <code>Bearer</code>.</dd></div><div><dt>Custom headers</dt><dd>None. CoreApp sends the Auth Token as <code>X-Widget-Token</code>.</dd></div><div><dt>Send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Trigger</dt><dd>Choose the Index gesture you want, such as double-click and hold.</dd></div></dl>
+                    </article>
+                    <article class="client-guide-card">
+                      <span class="client-type">Pebble watch app / custom client</span>
+                      <h4>Use the API fields your app exposes</h4>
+                      <div class="copy-field"><label for="setup-openai-base-url">OpenAI-compatible Base URL</label><div><input id="setup-openai-base-url" type="text" readonly spellcheck="false" placeholder="Complete step 1"><button type="button" class="copy-button" data-copy-target="setup-openai-base-url" disabled>Copy</button></div></div>
+                      <dl class="placement-list"><div><dt>Header name</dt><dd><code>Authorization</code></dd></div><div><dt>Header value</dt><dd><code>Bearer pp_…</code> — include <code>Bearer</code> and one space.</dd></div><div><dt>Voice upload URL</dt><dd>Use the Index webhook URL only if the app sends Index-compatible multipart fields.</dd></div><div><dt>MCP URL</dt><dd><code id="setup-mcp-url">Complete step 1</code></dd></div></dl>
+                    </article>
+                  </div>
+                </div>
+              </li>
+
+              <li class="setup-step">
+                <div class="step-number" aria-hidden="true">4</div>
+                <div class="step-content">
+                  <div class="step-heading"><div><span class="eyebrow">Verify</span><h3>Send one test recording</h3></div></div>
+                  <p>Trigger the ring or watch once, then open Recordings. A successful webhook appears as <strong>Received</strong> or <strong>Ready</strong>. If it does not appear, re-check the public origin and Auth Token field.</p>
+                  <button class="button button-secondary" type="button" data-go="recordings">Open recordings</button>
+                </div>
+              </li>
+            </ol>
+          </section>
+
           <section class="page" id="page-overview" data-page="overview">
             <div class="hero-card">
               <div class="hero-copy">
@@ -93,7 +160,7 @@
                 <h2>Your services, one secure endpoint.</h2>
                 <p>Pebble Proxy authenticates every device, keeps Umbrel services private, and routes only the capabilities you choose.</p>
                 <div class="hero-actions">
-                  <button class="button button-primary" type="button" data-go="devices">Add a device</button>
+                  <button class="button button-primary" type="button" data-go="setup">Start guided setup</button>
                   <button class="button button-secondary" type="button" data-go="backends">Configure AI</button>
                 </div>
               </div>
@@ -140,7 +207,7 @@
                   <label for="pebble-webhook-url">Pebble webhook URL</label>
                   <div><input id="pebble-webhook-url" type="text" readonly spellcheck="false" placeholder="Set the public HTTPS origin above"><button type="button" class="copy-button" id="copy-pebble-webhook-url" data-copy-target="pebble-webhook-url" disabled>Copy</button></div>
                 </div>
-                <p class="helper">In the Pebble app, use this exact URL and add a header named <code>Authorization</code> with the value <code>Bearer &lt;one-time device token&gt;</code>. Enable the token’s Voice webhook scope.</p>
+                <p class="helper">Pebble Index/CoreApp: paste this into <strong>Webhook URL</strong>, then paste the raw one-time token into <strong>Auth Token</strong>—no <code>Bearer</code> prefix and no custom header. Custom clients may instead use <code>Authorization: Bearer &lt;token&gt;</code>.</p>
                 <div class="copy-field copy-field-secondary">
                   <label for="cloudflare-service-url">Internal Cloudflared target (Docker only)</label>
                   <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
@@ -203,7 +270,7 @@
 
           <section class="page" id="page-speech" data-page="speech" hidden>
             <div class="section-toolbar">
-              <div><h2>Speech to text</h2><p>Transcribe recordings through LocalAI on Umbrel’s internal Docker network.</p></div>
+              <div><h2>Speech services</h2><p>Use LocalAI/Whisper for transcription and Kokoro for spoken audio.</p></div>
               <div class="health-summary"><span class="status-dot status-unknown" id="stt-health-dot"></span><span id="stt-health-label">Not checked</span></div>
             </div>
             <div class="content-grid settings-grid">
@@ -231,6 +298,38 @@
                 <p id="stt-health-message">Save your LocalAI configuration, then test the internal connection.</p>
                 <dl class="detail-list" id="stt-health-details"></dl>
                 <div class="privacy-note"><strong>Never public</strong><p>The transcription endpoint is not exposed by Pebble Proxy. Audio is sent only from the background worker to the configured internal provider.</p></div>
+              </aside>
+            </div>
+
+            <div class="section-toolbar subsection-toolbar speech-subsection">
+              <div><h2>Text to speech</h2><p>Kokoro turns text into audio; it does not transcribe recordings.</p></div>
+              <div class="health-summary"><span class="status-dot status-unknown" id="tts-health-dot"></span><span id="tts-health-label">Not checked</span></div>
+            </div>
+            <article class="info-strip info-strip-accent">
+              <span aria-hidden="true">i</span>
+              <p>Install the official <strong>Kokoro</strong> app from Umbrel first. Pebble Proxy connects privately to <code>kokoro_web_1:8880</code> and exposes a token-protected OpenAI-compatible <code>/v1/audio/speech</code> route for companion apps that can play audio. Pebble Index itself has no audio output.</p>
+            </article>
+            <div class="content-grid settings-grid">
+              <form class="panel settings-form" id="tts-form">
+                <div class="panel-header"><div><span class="eyebrow">Official Umbrel app</span><h3>Kokoro spoken audio</h3></div><label class="switch"><input type="checkbox" name="enabled" id="tts-enabled"><span></span><b>Enabled</b></label></div>
+                <div class="field-grid">
+                  <label class="field field-wide"><span>Internal base URL</span><input name="baseUrl" id="tts-base-url" type="url" value="http://kokoro_web_1:8880" autocomplete="off" required><small>Preset for Umbrel’s official Kokoro app. This address stays private.</small></label>
+                  <label class="field"><span>Speech path</span><input name="speechPath" id="tts-speech-path" value="/v1/audio/speech" required></label>
+                  <label class="field"><span>Voices path</span><input name="voicesPath" id="tts-voices-path" value="/v1/audio/voices" required></label>
+                  <label class="field"><span>Health path</span><input name="healthPath" id="tts-health-path" value="/health" required></label>
+                  <label class="field"><span>Model</span><input name="model" id="tts-model" value="kokoro" required></label>
+                  <label class="field"><span>Default voice</span><input name="voice" id="tts-voice" value="af_heart" required></label>
+                  <label class="field"><span>Audio format</span><select name="responseFormat" id="tts-response-format"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="opus">Opus</option><option value="flac">FLAC</option><option value="aac">AAC</option><option value="pcm">PCM</option></select></label>
+                </div>
+                <div class="form-actions"><button class="button button-secondary" id="test-tts" type="button">Test connection</button><button class="button button-primary" type="submit">Save settings</button></div>
+              </form>
+              <aside class="panel health-panel">
+                <span class="eyebrow">Provider health</span>
+                <div class="health-orb" id="tts-health-orb"><span></span></div>
+                <h3 id="tts-health-title">Waiting for a health check</h3>
+                <p id="tts-health-message">Install Kokoro, save the preset, then test the private connection.</p>
+                <dl class="detail-list" id="tts-health-details"></dl>
+                <div class="privacy-note"><strong>Token protected</strong><p>Clients call Pebble Proxy’s public <code>/v1/audio/speech</code> endpoint with a device token. Kokoro remains on Umbrel’s private Docker network.</p></div>
               </aside>
             </div>
           </section>
@@ -280,7 +379,7 @@
         <div class="modal-header"><div><span class="eyebrow">New credential</span><h2>Create device token</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
         <p class="modal-intro">Give every watch or app its own token so access can be limited and revoked independently.</p>
         <label class="field"><span>Device name</span><input name="name" required maxlength="80" placeholder="My Pebble Index" autocomplete="off"></label>
-        <fieldset class="scope-field"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
+        <fieldset class="scope-field"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="tts:speech" checked><span><strong>Spoken audio</strong><small>Generate audio through the private Kokoro app</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
         <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expires</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
         <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Create token</button></div>
       </form>
@@ -297,7 +396,14 @@
             <label for="new-device-webhook-url">Pebble webhook URL</label>
             <div><input id="new-device-webhook-url" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-webhook-url">Copy</button></div>
           </div>
-          <p class="helper">In the Pebble app, add an <code>Authorization</code> header whose value is <code>Bearer</code>, one space, then the token above.</p>
+          <div class="token-placement">
+            <strong>Pebble Index / CoreApp</strong>
+            <p>Paste the URL above into <code>Index Settings → Webhook → Webhook URL</code>. Paste the raw token into <code>Auth Token</code>. Do not add <code>Bearer</code>; CoreApp sends it as <code>X-Widget-Token</code>.</p>
+          </div>
+          <div class="token-placement">
+            <strong>Custom Pebble watch app or API client</strong>
+            <p>Use <code>Authorization</code> as the header name and <code>Bearer &lt;token above&gt;</code> as its value. Use your public origin plus <code>/v1</code> as the OpenAI-compatible base URL.</p>
+          </div>
         </div>
         <label class="confirm-check"><input type="checkbox" id="token-saved"><span>I saved this token somewhere secure.</span></label>
         <button class="button button-primary button-block" id="close-token-dialog" type="button" disabled>Done</button>
@@ -365,7 +471,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.3" defer></script>
-    <script src="/app.js?v=0.1.0-test.3" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.4" defer></script>
+    <script src="/app.js?v=0.1.0-test.4" defer></script>
   </body>
 </html>

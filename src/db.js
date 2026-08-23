@@ -151,6 +151,25 @@ CREATE TABLE IF NOT EXISTS stt_config (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tts_config (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  provider_type TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  speech_path TEXT NOT NULL,
+  voices_path TEXT NOT NULL,
+  health_path TEXT NOT NULL,
+  model TEXT NOT NULL,
+  voice TEXT NOT NULL,
+  response_format TEXT NOT NULL,
+  encrypted_credential TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 1,
+  health_status TEXT NOT NULL DEFAULT 'unknown',
+  last_health_at TEXT,
+  last_error TEXT,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notes (
   id TEXT PRIMARY KEY,
   device_id TEXT NOT NULL REFERENCES device_credentials(id) ON DELETE CASCADE,
@@ -211,6 +230,12 @@ export function createDatabase(databasePath) {
     (id, provider_type, base_url, transcription_path, health_path, model, enabled, revision, health_status, updated_at)
     VALUES (1, 'localai', 'http://localai_api_1:8080', '/v1/audio/transcriptions', '/readyz', 'whisper-1', 0, 1, 'unknown', ?)`)
     .run(now);
+
+  db.prepare(`INSERT OR IGNORE INTO tts_config
+    (id, provider_type, base_url, speech_path, voices_path, health_path, model, voice,
+     response_format, enabled, revision, health_status, updated_at)
+    VALUES (1, 'kokoro', 'http://kokoro_web_1:8880', '/v1/audio/speech',
+      '/v1/audio/voices', '/health', 'kokoro', 'af_heart', 'mp3', 0, 1, 'unknown', ?)`).run(now);
 
   return db;
 }

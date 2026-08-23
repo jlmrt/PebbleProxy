@@ -52,6 +52,8 @@ export function loadConfig(overrides = {}) {
     sttTimeoutMs: integer(env.STT_TIMEOUT_MS, 120000, 5000, 600000),
     sttMaxAttempts: integer(env.STT_MAX_ATTEMPTS, 3, 1, 10),
     sttRetryDelaysMs: integerList(env.STT_RETRY_DELAYS_MS, [15000, 60000, 300000]),
+    ttsTimeoutMs: integer(env.TTS_TIMEOUT_MS, 120000, 5000, 600000),
+    ttsMaxResponseBytes: integer(env.TTS_MAX_RESPONSE_BYTES, 32 * 1024 * 1024, 1024, 128 * 1024 * 1024),
     aiTimeoutMs: integer(env.AI_TIMEOUT_MS, 90000, 5000, 600000),
     aiMaxMessages: integer(env.AI_MAX_MESSAGES, 64, 1, 512),
     aiMaxMessageChars: integer(env.AI_MAX_MESSAGE_CHARS, 16384, 256, 262144),

@@ -2,7 +2,22 @@ import crypto from 'node:crypto';
 import { bearerToken, HttpError, safeJson } from './http.js';
 import { nowIso, transaction } from './db.js';
 
-export const DEVICE_SCOPES = Object.freeze(['ai:chat', 'webhook:write', 'mcp:invoke']);
+export const DEVICE_SCOPES = Object.freeze(['ai:chat', 'webhook:write', 'tts:speech', 'mcp:invoke']);
+
+function compatibilityToken(req) {
+  const candidates = [bearerToken(req)];
+  for (const name of ['x-widget-token', 'x-pebble-token', 'x-webhook-token']) {
+    const value = req.headers[name];
+    if (value === undefined) continue;
+    if (Array.isArray(value) || typeof value !== 'string' || /[\r\n]/.test(value)) {
+      throw new HttpError(400, 'invalid_api_key', `${name} must contain one token`);
+    }
+    candidates.push(value.trim());
+  }
+  const supplied = [...new Set(candidates.filter(Boolean))];
+  if (supplied.length > 1) throw new HttpError(400, 'conflicting_api_keys', 'Authentication headers contain different tokens');
+  return supplied[0] || '';
+}
 
 function tokenId(token) {
   const match = /^pp_([a-f0-9]{16})_[A-Za-z0-9_-]{32,}$/.exec(token);
@@ -35,8 +50,8 @@ function publicDevice(row) {
 export function createAuthenticator({ db, cryptoService }) {
   const touchTimes = new Map();
 
-  return async function authenticate(req, requiredScope) {
-    const token = bearerToken(req);
+  return async function authenticate(req, requiredScope, options = {}) {
+    const token = options.allowWebhookHeaders ? compatibilityToken(req) : bearerToken(req);
     const id = tokenId(token);
     const row = id ? db.prepare('SELECT * FROM device_credentials WHERE id = ?').get(id) : null;
     const valid = Boolean(row && cryptoService.verifyToken(token, row.secret_hash));

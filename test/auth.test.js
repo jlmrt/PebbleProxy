@@ -39,6 +39,27 @@ test('device tokens are scoped, stored hashed, revocable, and reset sessions', a
   await assert.rejects(() => authenticate(req, 'mcp:invoke'), (error) => error.status === 401);
 });
 
+test('Index webhook authentication accepts CoreApp Auth Token headers only when explicitly enabled', async (t) => {
+  const value = fixture();
+  t.after(() => value.close());
+  const created = createDevice(value.db, value.cryptoService, {
+    name: 'Index ring', scopes: ['webhook:write']
+  });
+  const authenticate = createAuthenticator({ db: value.db, cryptoService: value.cryptoService });
+  const coreApp = { headers: { 'x-widget-token': created.token } };
+
+  const device = await authenticate(coreApp, 'webhook:write', { allowWebhookHeaders: true });
+  assert.equal(device.id, created.device.id);
+  await assert.rejects(
+    () => authenticate(coreApp, 'webhook:write'),
+    (error) => error.status === 401
+  );
+  await assert.rejects(
+    () => authenticate({ headers: { authorization: `Bearer ${created.token}`, 'x-widget-token': 'different' } }, 'webhook:write', { allowWebhookHeaders: true }),
+    (error) => error.status === 400 && error.code === 'conflicting_api_keys'
+  );
+});
+
 test('limiter separates concurrency by device and releases leases', () => {
   const limiter = new DeviceLimiter();
   const first = { id: 'first', requests_per_minute: 10, max_concurrency: 1 };
