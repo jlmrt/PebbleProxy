@@ -1,0 +1,10 @@
+data/*
+!data/.gitkeep
+coverage/
+dist/
+node_modules/
+.DS_Store
+*.log
+*.tmp
+.env
+draft-docs/

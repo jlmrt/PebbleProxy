@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090b0f">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
+    <title>Pebble Proxy</title>
+    <link rel="stylesheet" href="/styles.css?v=0.1.0">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <div class="brand-name">Pebble Proxy</div>
+            <div class="brand-kicker">for umbrelOS</div>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a class="nav-item" href="#overview" data-route="overview">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"/></svg>
+            <span>Overview</span>
+          </a>
+          <a class="nav-item" href="#devices" data-route="devices">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v13h8V5H8Zm3 14v1h2v-1h-2Z"/></svg>
+            <span>Devices</span>
+          </a>
+          <a class="nav-item" href="#backends" data-route="backends">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a4 4 0 0 1 4 4v1h1a4 4 0 0 1 2 7.46V15a5 5 0 0 1-5 5h-1v2h-2v-2H9a5 5 0 0 1-5-5v-.54A4 4 0 0 1 6 7h2V6a4 4 0 0 1 4-4Zm-2 7H6a2 2 0 0 0-.48 3.94l.86.21-.26.85A3 3 0 0 0 9 18h5a3 3 0 0 0 3-3v-1.85l.48-.27A2 2 0 0 0 17 9h-3V6a2 2 0 1 0-4 0v3Z"/></svg>
+            <span>AI backends</span>
+          </a>
+          <a class="nav-item" href="#speech" data-route="speech">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm-5-3a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.93V21h-2v-3.07A7 7 0 0 1 5 11h2Z"/></svg>
+            <span>Speech to text</span>
+          </a>
+          <a class="nav-item" href="#recordings" data-route="recordings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg>
+            <span>Recordings</span>
+            <span class="nav-count" id="recordings-nav-count" hidden>0</span>
+          </a>
+          <a class="nav-item" href="#organizer" data-route="organizer">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10a2 2 0 0 1 2 2v18l-7-3-7 3V4a2 2 0 0 1 2-2Zm0 2v14.92l5-2.14 5 2.14V4H7Zm2 3h6v2H9V7Zm0 4h6v2H9v-2Z"/></svg>
+            <span>Notes &amp; reminders</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="privacy-pill">
+            <span class="lock-dot" aria-hidden="true"></span>
+            <div><strong>Private admin</strong><small>Umbrel access only</small></div>
+          </div>
+          <p>Public clients never receive upstream URLs, credentials, or internal service details.</p>
+        </div>
+      </aside>
+
+      <button class="sidebar-scrim" id="sidebar-scrim" type="button" aria-label="Close navigation" hidden></button>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="icon-button mobile-menu" id="mobile-menu" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"/></svg>
+            </button>
+            <div>
+              <h1 id="page-title">Overview</h1>
+              <p id="page-subtitle">Your private bridge between Pebble and Umbrel.</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <div class="connection-state" id="connection-state" title="Admin API status">
+              <span class="status-dot status-unknown" aria-hidden="true"></span>
+              <span>Checking</span>
+            </div>
+            <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh current page" title="Refresh">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.76-4.24L13 11h8V3l-3.35 3.35Z"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <main id="main-content" tabindex="-1">
+          <section class="page" id="page-overview" data-page="overview">
+            <div class="hero-card">
+              <div class="hero-copy">
+                <span class="eyebrow"><span class="pulse-dot"></span> Pebble gateway</span>
+                <h2>Your services, one secure endpoint.</h2>
+                <p>Pebble Proxy authenticates every device, keeps Umbrel services private, and routes only the capabilities you choose.</p>
+                <div class="hero-actions">
+                  <button class="button button-primary" type="button" data-go="devices">Add a device</button>
+                  <button class="button button-secondary" type="button" data-go="backends">Configure AI</button>
+                </div>
+              </div>
+              <div class="route-visual" aria-label="Traffic route: Pebble to Cloudflare to Proxy to private Umbrel services">
+                <div class="route-node node-watch"><span class="watch-glyph">P</span><small>Pebble</small></div>
+                <div class="route-line"><i></i></div>
+                <div class="route-node"><span>CF</span><small>Tunnel</small></div>
+                <div class="route-line"><i></i></div>
+                <div class="route-node node-proxy"><span>PP</span><small>Proxy</small></div>
+                <div class="route-line route-private"><i></i></div>
+                <div class="route-node"><span>AI</span><small>Private</small></div>
+              </div>
+            </div>
+
+            <div class="metric-grid" id="overview-metrics" aria-live="polite"></div>
+
+            <div class="content-grid overview-grid">
+              <article class="panel">
+                <div class="panel-header">
+                  <div><span class="eyebrow">Connectivity</span><h3>Cloudflare Tunnel</h3></div>
+                  <span class="badge badge-neutral" id="cloudflare-badge">Not checked</span>
+                </div>
+                <div class="connection-map">
+                  <div class="map-row">
+                    <div class="map-icon public-icon" aria-hidden="true">↗</div>
+                    <div><strong>Public API</strong><small id="public-hostname">Add your public hostname</small></div>
+                    <span class="badge badge-neutral" id="public-api-status">Unknown</span>
+                  </div>
+                  <div class="map-divider"></div>
+                  <div class="map-row">
+                    <div class="map-icon private-icon" aria-hidden="true">⌂</div>
+                    <div><strong>Admin interface</strong><small>Protected by the Umbrel app proxy</small></div>
+                    <span class="badge badge-success">Private</span>
+                  </div>
+                </div>
+                <div class="copy-field">
+                  <label for="cloudflare-service-url">Cloudflared service URL</label>
+                  <div><code id="cloudflare-service-url">http://pebble-proxy_api_1:8080</code><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
+                </div>
+                <p class="helper">Configure this address as the service for your published hostname in the separately installed Cloudflared Umbrel app.</p>
+              </article>
+
+              <article class="panel">
+                <div class="panel-header">
+                  <div><span class="eyebrow">Latest activity</span><h3>Voice inbox</h3></div>
+                  <button class="text-button" type="button" data-go="recordings">View all</button>
+                </div>
+                <div id="overview-activity" class="activity-list" aria-live="polite"></div>
+              </article>
+            </div>
+
+            <article class="security-banner">
+              <div class="security-icon" aria-hidden="true">✓</div>
+              <div><strong>Privacy boundary active</strong><p>Only the public API listener belongs in your tunnel. Admin pages, recordings, provider credentials, LocalAI, OpenClaw, and Hermes stay on Umbrel’s private network.</p></div>
+            </article>
+          </section>
+
+          <section class="page" id="page-devices" data-page="devices" hidden>
+            <div class="section-toolbar">
+              <div><h2>Device access</h2><p>Issue a separate scoped token for every watch or Pebble app.</p></div>
+              <button class="button button-primary" id="open-device-dialog" type="button">Create device token</button>
+            </div>
+            <article class="info-strip">
+              <span aria-hidden="true">i</span>
+              <p>Tokens are shown once. Pebble Proxy stores only a secure hash, so a lost token must be revoked and replaced.</p>
+            </article>
+            <div class="panel table-panel">
+              <div class="table-toolbar">
+                <label class="search-field"><span class="sr-only">Search devices</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 20-5.2-5.2a7 7 0 1 0-1.4 1.4L20 21l1-1ZM5 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0Z"/></svg><input id="device-search" type="search" placeholder="Search devices"></label>
+                <span class="muted" id="device-total"></span>
+              </div>
+              <div id="devices-list" class="data-list" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <section class="page" id="page-backends" data-page="backends" hidden>
+            <div class="section-toolbar">
+              <div><h2>AI backends</h2><p>Expose stable public model aliases while provider addresses and secrets stay private.</p></div>
+              <button class="button button-primary" id="open-backend-dialog" type="button">Add backend</button>
+            </div>
+            <article class="info-strip info-strip-accent">
+              <span aria-hidden="true">↔</span>
+              <p>Public device requests can select only an alias below. Client-supplied upstream URLs, authorization headers, and OpenClaw routing headers are never forwarded.</p>
+            </article>
+            <div id="backends-list" class="card-grid" aria-live="polite"></div>
+
+            <div class="section-toolbar subsection-toolbar">
+              <div><h2>Model aliases</h2><p>The safe model names advertised by Pebble Proxy’s <code>/v1/models</code> endpoint.</p></div>
+              <button class="button button-secondary" id="open-alias-dialog" type="button">Add alias</button>
+            </div>
+            <div class="panel table-panel">
+              <div id="aliases-list" class="data-list" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <section class="page" id="page-speech" data-page="speech" hidden>
+            <div class="section-toolbar">
+              <div><h2>Speech to text</h2><p>Transcribe recordings through LocalAI on Umbrel’s internal Docker network.</p></div>
+              <div class="health-summary"><span class="status-dot status-unknown" id="stt-health-dot"></span><span id="stt-health-label">Not checked</span></div>
+            </div>
+            <div class="content-grid settings-grid">
+              <form class="panel settings-form" id="stt-form">
+                <div class="panel-header"><div><span class="eyebrow">Private provider</span><h3>LocalAI transcription</h3></div><label class="switch"><input type="checkbox" name="enabled" id="stt-enabled"><span></span><b>Enabled</b></label></div>
+                <div class="field-grid">
+                  <label class="field field-wide"><span>Internal base URL</span><input name="baseUrl" id="stt-base-url" type="url" value="http://localai_api_1:8080" autocomplete="off" required><small>Admin-managed only. Recording requests cannot override this URL.</small></label>
+                  <label class="field"><span>Transcription path</span><input name="transcriptionPath" id="stt-transcription-path" value="/v1/audio/transcriptions" required></label>
+                  <label class="field"><span>Health path</span><input name="healthPath" id="stt-health-path" value="/readyz" required></label>
+                  <label class="field"><span>Model</span><input name="model" id="stt-model" placeholder="whisper-1" required></label>
+                  <label class="field"><span>Language <em>optional</em></span><input name="language" id="stt-language" placeholder="auto"></label>
+                  <label class="field field-wide"><span>Bearer credential <em>optional</em></span><input name="credential" id="stt-credential" type="password" autocomplete="new-password" placeholder="Leave blank to keep the stored credential"><small>A saved credential is never returned to this page.</small></label>
+                </div>
+                <label class="confirm-check"><input type="checkbox" name="clearCredential" id="stt-clear-credential"><span>Remove the saved STT credential</span></label>
+                <div class="form-actions">
+                  <button class="button button-secondary" id="test-stt" type="button">Test connection</button>
+                  <button class="button button-primary" type="submit">Save settings</button>
+                </div>
+              </form>
+
+              <aside class="panel health-panel">
+                <span class="eyebrow">Provider health</span>
+                <div class="health-orb" id="stt-health-orb"><span></span></div>
+                <h3 id="stt-health-title">Waiting for a health check</h3>
+                <p id="stt-health-message">Save your LocalAI configuration, then test the internal connection.</p>
+                <dl class="detail-list" id="stt-health-details"></dl>
+                <div class="privacy-note"><strong>Never public</strong><p>The transcription endpoint is not exposed by Pebble Proxy. Audio is sent only from the background worker to the configured internal provider.</p></div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="page" id="page-recordings" data-page="recordings" hidden>
+            <div class="section-toolbar">
+              <div><h2>Recordings</h2><p>Both Pebble-provided and locally generated transcripts are retained.</p></div>
+              <span class="muted" id="recording-total"></span>
+            </div>
+            <div class="status-legend" aria-label="Recording statuses">
+              <span class="badge badge-received">Received</span><span class="badge badge-transcribing">Transcribing</span><span class="badge badge-ready">Ready</span><span class="badge badge-error">Error</span>
+            </div>
+            <div class="panel table-panel">
+              <div class="table-toolbar recording-toolbar">
+                <label class="search-field"><span class="sr-only">Search recordings</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 20-5.2-5.2a7 7 0 1 0-1.4 1.4L20 21l1-1ZM5 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0Z"/></svg><input id="recording-search" type="search" placeholder="Search transcripts"></label>
+                <label class="compact-select"><span class="sr-only">Filter by status</span><select id="recording-status"><option value="">All states</option><option value="received">Received</option><option value="transcribing">Transcribing</option><option value="ready">Ready</option><option value="error">Error</option></select></label>
+              </div>
+              <div id="recordings-list" class="data-list recordings-list" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <section class="page" id="page-organizer" data-page="organizer" hidden>
+            <div class="section-toolbar">
+              <div><h2>Notes &amp; reminders</h2><p>A small, private MCP-ready workspace for useful voice commands.</p></div>
+            </div>
+            <div class="organizer-grid">
+              <section class="panel organizer-panel">
+                <div class="panel-header"><div><span class="eyebrow">Capture</span><h3>Notes</h3></div><button class="icon-button icon-button-small" id="open-note-dialog" type="button" aria-label="Add note" title="Add note">+</button></div>
+                <div id="notes-list" class="note-list" aria-live="polite"></div>
+              </section>
+              <section class="panel organizer-panel">
+                <div class="panel-header"><div><span class="eyebrow">Remember</span><h3>Reminders</h3></div><button class="icon-button icon-button-small" id="open-reminder-dialog" type="button" aria-label="Add reminder" title="Add reminder">+</button></div>
+                <div id="reminders-list" class="reminder-list" aria-live="polite"></div>
+              </section>
+            </div>
+            <article class="mcp-card">
+              <div class="mcp-mark" aria-hidden="true">MCP</div>
+              <div><strong>Built for voice commands</strong><p>The proxy’s authenticated MCP server can expose only these note and reminder tools to compatible Pebble assistants. Internal storage and administrative actions remain private.</p></div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog class="modal" id="device-dialog">
+      <form method="dialog" class="modal-card" id="device-form">
+        <div class="modal-header"><div><span class="eyebrow">New credential</span><h2>Create device token</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <p class="modal-intro">Give every watch or app its own token so access can be limited and revoked independently.</p>
+        <label class="field"><span>Device name</span><input name="name" required maxlength="80" placeholder="My Pebble Index" autocomplete="off"></label>
+        <fieldset class="scope-field"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
+        <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expires</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Create token</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="token-dialog">
+      <div class="modal-card token-card">
+        <div class="success-seal" aria-hidden="true">✓</div>
+        <h2>Token created</h2>
+        <p class="modal-intro">Copy it now. This secret will not be displayed again.</p>
+        <div class="token-display"><code id="new-device-token"></code><button class="copy-button" type="button" data-copy-target="new-device-token">Copy</button></div>
+        <label class="confirm-check"><input type="checkbox" id="token-saved"><span>I saved this token somewhere secure.</span></label>
+        <button class="button button-primary button-block" id="close-token-dialog" type="button" disabled>Done</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal" id="backend-dialog">
+      <form method="dialog" class="modal-card modal-card-wide" id="backend-form">
+        <div class="modal-header"><div><span class="eyebrow">Private connection</span><h2>Add AI backend</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="preset-picker" role="radiogroup" aria-label="Backend preset">
+          <label><input type="radio" name="preset" value="openclaw" checked><span><b>OpenClaw</b><small>Umbrel preset</small></span></label>
+          <label><input type="radio" name="preset" value="hermes"><span><b>Hermes</b><small>Umbrel preset</small></span></label>
+          <label><input type="radio" name="preset" value="generic"><span><b>Generic</b><small>OpenAI compatible</small></span></label>
+        </div>
+        <div class="field-grid">
+          <label class="field"><span>Display name</span><input name="name" id="backend-name" required></label>
+          <label class="field"><span>Authentication</span><select name="authType" id="backend-auth-type"><option value="none">None / wrapper managed</option><option value="bearer">Bearer token</option></select></label>
+          <label class="field field-wide"><span>Internal base URL</span><input name="baseUrl" id="backend-base-url" type="url" autocomplete="off" required><small>Must be an administrator-approved internal service. Clients cannot choose this value.</small></label>
+          <label class="field"><span>Chat path</span><input name="chatPath" id="backend-chat-path" required></label>
+          <label class="field"><span>Models path</span><input name="modelsPath" id="backend-models-path" required></label>
+          <label class="field"><span>Health path</span><input name="healthPath" id="backend-health-path"></label>
+          <label class="field field-wide"><span>Credential</span><input name="credential" id="backend-credential" type="password" autocomplete="new-password" disabled><small>Encrypted at rest and never sent to Pebble clients.</small></label>
+        </div>
+        <div class="external-provider-option" id="backend-external-option" hidden>
+          <label class="switch standalone-switch"><input type="checkbox" name="allowExternal" id="backend-allow-external" disabled><span></span><b>Allow an external HTTPS provider</b></label>
+          <p>Off by default. Enable only for a trusted Internet provider; private and special network addresses remain blocked.</p>
+        </div>
+        <label class="switch standalone-switch"><input type="checkbox" name="enabled" checked><span></span><b>Enable after saving</b></label>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save backend</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="alias-dialog">
+      <form method="dialog" class="modal-card" id="alias-form">
+        <div class="modal-header"><div><span class="eyebrow">Public model</span><h2>Add model alias</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <label class="field"><span>Public alias</span><input name="alias" required pattern="[a-zA-Z0-9._-]+" placeholder="pebble-assistant"><small>This is the only model name devices will see.</small></label>
+        <label class="field"><span>Backend</span><select name="backendId" id="alias-backend" required></select></label>
+        <label class="field"><span>Downstream model or agent</span><input name="downstreamModel" required placeholder="openclaw/pebble"></label>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Add alias</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal recording-dialog" id="recording-dialog">
+      <div class="modal-card modal-card-wide" id="recording-detail"></div>
+    </dialog>
+
+    <dialog class="modal" id="note-dialog">
+      <form method="dialog" class="modal-card" id="note-form">
+        <div class="modal-header"><div><span class="eyebrow">Private note</span><h2>Add note</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <label class="field"><span>Device</span><select name="deviceId" id="note-device" required><option value="" disabled selected>Select an active device</option></select><small>The note belongs to this device’s isolated MCP workspace.</small></label>
+        <label class="field"><span>Title</span><input name="title" maxlength="120" required></label>
+        <label class="field"><span>Note</span><textarea name="body" rows="6" maxlength="5000" required></textarea></label>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save note</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="reminder-dialog">
+      <form method="dialog" class="modal-card" id="reminder-form">
+        <div class="modal-header"><div><span class="eyebrow">Private reminder</span><h2>Add reminder</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <label class="field"><span>Device</span><select name="deviceId" id="reminder-device" required><option value="" disabled selected>Select an active device</option></select><small>The reminder is isolated to this device.</small></label>
+        <label class="field"><span>Reminder</span><input name="title" maxlength="180" required></label>
+        <label class="field"><span>Due date and time</span><input name="dueAt" type="datetime-local" required></label>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save reminder</button></div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script src="/app.js?v=0.1.0" defer></script>
+  </body>
+</html>

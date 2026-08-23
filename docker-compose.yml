@@ -1,0 +1,82 @@
+services:
+  app_proxy:
+    environment:
+      APP_HOST: pebble-proxy_admin_1
+      APP_PORT: 3000
+    networks:
+      - default
+      - admin_internal
+
+  admin:
+    build:
+      context: .
+    user: "1000:1000"
+    restart: on-failure
+    init: true
+    stop_grace_period: 20s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    environment:
+      ROLE: admin
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_PORT: 3000
+      DATA_DIR: /data
+      APP_SEED: ${APP_SEED}
+      PUBLIC_BASE_URL: ${PEBBLE_PROXY_PUBLIC_BASE_URL:-}
+      ALLOWED_PUBLIC_HOSTS: ${PEBBLE_PROXY_ALLOWED_HOSTS:-}
+      NODE_ENV: production
+    networks:
+      - admin_internal
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+    user: "1000:1000"
+    restart: on-failure
+    init: true
+    stop_grace_period: 20s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    environment:
+      ROLE: public
+      PUBLIC_HOST: 0.0.0.0
+      PUBLIC_PORT: 8080
+      DATA_DIR: /data
+      APP_SEED: ${APP_SEED}
+      PUBLIC_BASE_URL: ${PEBBLE_PROXY_PUBLIC_BASE_URL:-}
+      ALLOWED_PUBLIC_HOSTS: ${PEBBLE_PROXY_ALLOWED_HOSTS:-}
+      NODE_ENV: production
+    expose:
+      - "8080"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  admin_internal:
+    internal: true

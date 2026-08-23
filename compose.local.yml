@@ -1,0 +1,17 @@
+services:
+  pebble-proxy:
+    build: .
+    image: pebble-proxy:0.1.0
+    restart: unless-stopped
+    environment:
+      ROLE: all
+      DATA_DIR: /data
+      NODE_ENV: production
+      APP_SEED: ${APP_SEED:-local-development-change-me}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    ports:
+      - "3000:3000"
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+

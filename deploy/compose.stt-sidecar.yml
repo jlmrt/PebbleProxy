@@ -1,0 +1,26 @@
+services:
+  stt-sidecar:
+    image: localai/localai:v4.9.0-cpu
+    restart: unless-stopped
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MODELS_PATH: /models
+      PRELOAD_MODELS: '[{"url":"github:mudler/LocalAI/gallery/whisper-base.yaml@v4.9.0","name":"whisper-1"}]'
+    volumes:
+      - ./data/localai-models:/models
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 5m
+    networks:
+      default:
+        aliases:
+          - pebble-proxy-stt

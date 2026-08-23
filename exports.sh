@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+export APP_PEBBLE_PROXY_API_HOST="pebble-proxy_api_1"
+export APP_PEBBLE_PROXY_API_PORT="8080"
+export APP_PEBBLE_PROXY_API_URL="http://${APP_PEBBLE_PROXY_API_HOST}:${APP_PEBBLE_PROXY_API_PORT}"
+
