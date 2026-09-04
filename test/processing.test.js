@@ -8,15 +8,17 @@ import { createCryptoService } from '../src/crypto.js';
 import { createDatabase, nowIso } from '../src/db.js';
 import { enqueueProcessingJob, listProcessingJobs, startProcessingWorker } from '../src/processing.js';
 
-test('Needle follows Index default-capture routing and permits reminders without a time', () => {
+test('Needle follows Index default-capture routing and distinguishes narrative dates from reminders', () => {
   const source = fs.readFileSync(new URL('../needle-sidecar/server.py', import.meta.url), 'utf8');
   const note = source.match(/"name": "create_note",[\s\S]*?(?=\n    \{\n        "name": "create_reminder")/)?.[0] || '';
   const reminder = source.match(/"name": "create_reminder",[\s\S]*?(?=\n    \{\n        "name": "forward_agent")/)?.[0] || '';
-  assert.match(source, /"tool_schema_version": "3"/);
+  assert.match(source, /"tool_schema_version": "4"/);
   assert.match(source, /ambiguous thoughts and observations default to create_note/);
   assert.match(source, /without requiring action words such as 'create a note'/);
-  assert.match(source, /future date or time paired with a task/);
-  assert.match(source, /always choose an action, falling back to create_note/);
+  assert.match(source, /standalone task instruction with a time/);
+  assert.match(source, /task mentioned inside a descriptive statement remains a note/);
+  assert.match(source, /always choose an action/);
+  assert.match(source, /to create_note/);
   assert.match(source, /"maxLength": 8000/);
   assert.match(note, /The user's complete input/);
   assert.doesNotMatch(note, /"title"/);
@@ -380,6 +382,42 @@ test('a no-action response falls back to a note without requiring command words'
   assert.equal(job.verification.policy, 'default_note_capture_v1');
   assert.equal(job.verification.outcome, 'accepted');
   assert.equal(job.verification.action_source, 'default_note_fallback');
+});
+
+test('a narrative future-time mention remains a note when Needle proposes a reminder', async (t) => {
+  const transcript = 'The community center has several repairs that the team expects to handle next month. One window sticks after rain.';
+  for (const confidence of [0, 0.97]) {
+    await t.test(`confidence ${confidence}`, async (t) => {
+      const app = fixture(t, {
+        type: 'call',
+        success: true,
+        function_calls: [{
+          name: 'create_reminder',
+          arguments: {
+            message: 'Handle the repairs next month',
+            date_time_human: 'next month'
+          }
+        }],
+        confidence,
+        validation: { ungrounded: ['create_reminder.message'], negation: false }
+      }, transcript);
+
+      const stop = startProcessingWorker(app.deps);
+      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+      await stop();
+
+      assert.deepEqual({ ...app.db.prepare('SELECT title, body FROM notes').get() }, {
+        title: 'The community center has several repairs that the team expects to handle next month.',
+        body: transcript
+      });
+      assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM reminders').get().count, 0);
+      const [job] = listProcessingJobs(app.db);
+      assert.equal(job.proposedAction.function_calls[0].name, 'create_reminder');
+      assert.equal(job.action.type, 'create_note');
+      assert.equal(job.verification.policy, 'narrative_note_fallback_v1');
+      assert.equal(job.verification.outcome, 'accepted');
+    });
+  }
 });
 
 test('default note capture keeps the complete transcript without trusting Needle note fields', async (t) => {

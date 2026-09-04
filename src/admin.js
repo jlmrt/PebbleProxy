@@ -358,7 +358,7 @@ function overview(db, config) {
   const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0-test.12',
+    version: '0.1.0-test.13',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,

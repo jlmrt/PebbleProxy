@@ -19,8 +19,8 @@ ROUTER_METADATA = {
     "model": "needle2-base",
     "package": "cactus-needle",
     "package_version": NEEDLE_PACKAGE_VERSION,
-    "router_version": "0.1.0-test.12",
-    "tool_schema_version": "3",
+    "router_version": "0.1.0-test.13",
+    "tool_schema_version": "4",
 }
 TOOLS = [
     {
@@ -42,7 +42,7 @@ TOOLS = [
     },
     {
         "name": "create_reminder",
-        "description": "Set a reminder, optionally for a future time. Use for reminder requests, 'remember to' tasks, or a future date or time paired with a task, even when the user does not say 'remind me'.",
+        "description": "Set a reminder, optionally for a future time. Use for explicit reminder requests, 'remember to' tasks, or a standalone timed task instruction. Do not use for descriptive statements that merely mention future work or a date.",
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -96,10 +96,12 @@ def system_facts(context):
         f"date: {date_fact}; locale: en; device: Pebble; assistant: Pebble Proxy. "
         "Route the voice capture to exactly one supported tool. Create a note with the user's complete input unless "
         "they clearly request a different supported action; ambiguous thoughts and observations default to create_note, "
-        "without requiring action words such as 'create a note'. Use create_reminder for a task paired with a future "
-        "date or time even without the word 'remind', and treat 'remember to do something' as a reminder while "
-        "'remember that' followed by a fact remains a note. A reminder without a time is valid. Never invent a time "
-        "or other detail. Copy user-provided values verbatim and always choose an action, falling back to create_note."
+        "without requiring action words such as 'create a note'. Use create_reminder only when the user explicitly "
+        "asks to remember a task or gives a standalone task instruction with a time. A future date, deadline, plan, "
+        "or task mentioned inside a descriptive statement remains a note. Treat 'remember to do something' as a "
+        "reminder while 'remember that' followed by a fact remains a note. A reminder without a time is valid. Never "
+        "invent a time or other detail. Copy user-provided values verbatim and always choose an action, falling back "
+        "to create_note."
     )
 
 

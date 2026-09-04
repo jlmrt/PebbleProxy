@@ -170,6 +170,8 @@ function safeMessage(value, fallback = 'Transcript processing failed') {
 const REMINDER_COMMAND_PREFIX = /^\s*(?:(?:(?:could|can|would)\s+you\s+)?please\s+|(?:(?:could|can|would)\s+you\s+))?(?:remind\s+me\b|(?:(?:i\s+(?:need|want)\s+to\s+)?remember\s+to)\b|(?:(?:create|add|set|save)\s+(?:a\s+)?reminder)\b(?=(?:\s+\S|\s*[,;:\-.!?\u2013\u2014])))\s*[,;:\-.!?\u2013\u2014]?\s*/iu;
 const NOTE_TITLE_PREFIX = /^\s*(?:please\s+)?(?:(?:(?:create|add|save|write|record|take|make)\s+(?:a\s+)?note)\b(?:\s+(?:that|about|saying)\b|\s*[.!?:,;\-\u2013\u2014]|\s+(?=\S))|note\b(?:\s+that\b|\s*[.:])|remember\s+that\b)\s*[,;:\-.!?\u2013\u2014]?\s*/iu;
 const SECOND_CREATE_COMMAND = /\b(?:and(?:\s+then)?|then)\s+(?:(?:please\s+)?(?:remind\s+me|remember\s+to)\b|(?:(?:please\s+)?(?:create|add|set|save)\s+(?:a\s+)?reminder\b)|(?:(?:please\s+)?(?:create|add|save|write|record|take|make)\s+(?:a\s+)?note\b)|note\s*:)/iu;
+const REMINDER_COMMAND_ANYWHERE = /\b(?:remind\s+me|remember\s+to|(?:create|add|set|save)\s+(?:a\s+)?reminder)\b/iu;
+const NON_DIRECTIVE_START = /^(?:i|we|you|he|she|they|it|there|this|that|these|those|the|a|an|my|our|your|one|need|want|plan|hope|expect|should|must|will|going)\b/iu;
 
 function normalizedRemainder(value) {
   return value
@@ -289,6 +291,59 @@ function exactOriginalSubstring(source, value, maxLength) {
   return match ? source.slice(match.index, match.index + match[0].length) : '';
 }
 
+function implicitReminderDirective(source, message, dateText) {
+  if (!message || !dateText) return false;
+  const sourceText = typeof source === 'string' ? source : '';
+  const messagePattern = message.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const datePattern = dateText.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const messageMatch = new RegExp(messagePattern, 'iu').exec(sourceText);
+  const dateMatch = new RegExp(datePattern, 'iu').exec(sourceText);
+  if (!messageMatch || !dateMatch || NON_DIRECTIVE_START.test(messageMatch[0].trim())) return false;
+  const separator = /^[\s,;:\-.!?\u2013\u2014]*$/u;
+  if (messageMatch.index < dateMatch.index) {
+    return /^\s*(?:please\s+)?$/iu.test(sourceText.slice(0, messageMatch.index))
+      && separator.test(sourceText.slice(messageMatch.index + messageMatch[0].length, dateMatch.index));
+  }
+  return /^\s*(?:please\s+)?$/iu.test(sourceText.slice(0, dateMatch.index))
+    && separator.test(sourceText.slice(dateMatch.index + dateMatch[0].length, messageMatch.index));
+}
+
+function reminderDirectivePresent(decision, transcript) {
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  if (call?.name !== 'create_reminder') return false;
+  const source = typeof transcript === 'string' ? transcript : '';
+  if (REMINDER_COMMAND_PREFIX.test(source)) return true;
+  const message = exactOriginalSubstring(source, call.arguments?.message, 200);
+  const dateText = exactOriginalSubstring(source, call.arguments?.date_time_human, 120);
+  return implicitReminderDirective(source, message, dateText);
+}
+
+function narrativeNoteFallbackVerification(decision, transcript) {
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  const note = defaultNoteParts(transcript);
+  const source = typeof transcript === 'string' ? transcript : '';
+  const checks = {
+    singleCreateReminder: call?.name === 'create_reminder',
+    reminderDirectiveAbsent: !reminderDirectivePresent(decision, source),
+    noExplicitReminderCommand: !REMINDER_COMMAND_ANYWHERE.test(source),
+    noSecondCreateCommand: !SECOND_CREATE_COMMAND.test(source),
+    originalTranscriptAvailable: note.body.length <= 8000 && /[\p{L}\p{N}]/u.test(note.body),
+    derivedTitleAvailable: note.title.length <= 120 && /[\p{L}\p{N}]/u.test(note.title)
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  return {
+    policy: 'narrative_note_fallback_v1',
+    accepted,
+    checks,
+    provenance: accepted ? {
+      action_source: 'unverified_reminder_note_fallback',
+      body_source: 'complete_original_transcript',
+      title_source: 'derived_from_original_transcript'
+    } : {},
+    action: accepted ? { name: 'create_note', arguments: { title: note.title, body: note.body } } : null
+  };
+}
+
 function groundedReminderVerification(decision, transcript) {
   const call = decision.calls.length === 1 ? decision.calls[0] : null;
   const args = call?.arguments;
@@ -312,6 +367,7 @@ function groundedReminderVerification(decision, transcript) {
     dateTimeExactSubstringOrOmitted: dateTimeOmitted || Boolean(groundedDateText),
     onlyExpectedValidation,
     negationAcceptable,
+    reminderDirectivePresent: implicitReminderDirective(source, message, groundedDateText),
     noSecondCreateCommand: !SECOND_CREATE_COMMAND.test(source)
   };
   const accepted = Object.values(checks).every(Boolean);
@@ -658,6 +714,15 @@ async function processClaim(deps, claim) {
     const decision = parseDecision(await routeTranscript(deps, claim));
     markRouterHealth(deps.db, 'healthy');
     const threshold = Number(claim.processing_config.confidence_threshold);
+    const narrativeFallback = decision.calls.length === 1 && decision.calls[0]?.name === 'create_reminder'
+      ? narrativeNoteFallbackVerification(decision, claim.transcript_text)
+      : null;
+    if (narrativeFallback?.accepted) {
+      attachDecisionMetadata(decision, claim, threshold, narrativeFallback);
+      logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed', 'default_note_capture');
+      await executeAction(deps, claim, decision, narrativeFallback.action);
+      return;
+    }
     const captureVerification = decision.calls.length === 0
       ? defaultCaptureVerification(decision, claim.transcript_text)
       : decision.calls.length === 1 && decision.calls[0]?.name === 'create_note'
