@@ -38,6 +38,9 @@ test('device and Needle diagnostics UI use the nested API contracts', () => {
   assert.match(script, /api\("\/device-groups"\)/);
   assert.match(script, /\/device-groups\/\$\{safeId\(id\)\}\/connections/);
   assert.match(script, /api\(`\/device-groups\/\$\{safeId\(id\)\}`,[\s\S]*?method: "DELETE"/);
+  assert.match(script, /\/device-groups\/\$\{safeId\(deviceId\)\}\/connections\/\$\{safeId\(connectionId\)\}/);
+  assert.match(script, /text: inactive \? "Delete" : "Revoke"/);
+  assert.match(script, /connections\.every\(\(connection\) => connectionState\(connection\)\.inactive\)/);
   assert.match(script, /body\.connectionType = plainText\(data\.get\("connectionType"\), "webhook"\)/);
   assert.match(script, /if \(body\.connectionType === "webhook"\) body\.indexTrigger/);
   assert.match(script, /Pebble Index custom MCP server/);

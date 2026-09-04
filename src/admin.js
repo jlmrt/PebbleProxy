@@ -4,7 +4,8 @@ import {
   createClientDevice,
   createDevice,
   createDeviceConnection,
-  deleteEmptyClientDevice,
+  deleteInactiveClientDevice,
+  deleteInactiveDeviceConnection,
   listClientDevices,
   listDevices,
   resetDeviceSessions,
@@ -357,7 +358,7 @@ function overview(db, config) {
   const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0-test.9',
+    version: '0.1.0-test.10',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,
@@ -422,7 +423,7 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     sendJson(res, 201, { device: createClientDevice(db, input) });
   });
   router.add('DELETE', '/admin/api/device-groups/:id', (_req, res, { params }) => {
-    deleteEmptyClientDevice(db, params.id);
+    deleteInactiveClientDevice(db, params.id);
     sendJson(res, 200, { ok: true });
   });
   router.add('POST', '/admin/api/device-groups/:id/connections', async (req, res, { params }) => {
@@ -433,6 +434,10 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
       connection: adminConnectionView(created.connection, publicBaseUrl),
       token: created.token
     });
+  });
+  router.add('DELETE', '/admin/api/device-groups/:id/connections/:connectionId', (_req, res, { params }) => {
+    deleteInactiveDeviceConnection(db, params.id, params.connectionId);
+    sendJson(res, 200, { ok: true });
   });
 
   router.add('GET', '/admin/api/backends', (_req, res) => {

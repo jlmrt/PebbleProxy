@@ -291,15 +291,60 @@ export function createDeviceConnection(db, cryptoService, ownerDeviceId, input =
   return insertDeviceConnection(db, cryptoService, parent, input);
 }
 
-export function deleteEmptyClientDevice(db, ownerDeviceId) {
+function inactiveCredential(row, now = Date.now()) {
+  if (row.revoked_at) return true;
+  const expiresAt = row.expires_at ? Date.parse(row.expires_at) : NaN;
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+function retainedConnectionData(db, connectionIds) {
+  if (!connectionIds.length) return 0;
+  const placeholders = connectionIds.map(() => '?').join(',');
+  return ['recordings', 'notes', 'reminders'].reduce((total, table) => total + Number(
+    db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE device_id IN (${placeholders})`)
+      .get(...connectionIds).count
+  ), 0);
+}
+
+function retainedDeviceData(db, ownerDeviceId) {
+  return ['recordings', 'notes', 'reminders'].reduce((total, table) => total + Number(
+    db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE device_id IN (
+      SELECT id FROM device_credentials WHERE owner_device_id = ?
+    )`).get(ownerDeviceId).count
+  ), 0);
+}
+
+export function deleteInactiveDeviceConnection(db, ownerDeviceId, connectionId) {
+  const ownerId = String(ownerDeviceId || '');
+  const id = String(connectionId || '');
+  transaction(db, () => {
+    const connection = db.prepare(`SELECT id, revoked_at, expires_at FROM device_credentials
+      WHERE id = ? AND owner_device_id = ?`).get(id, ownerId);
+    if (!connection) throw new HttpError(404, 'device_not_found', 'Connection not found');
+    if (!inactiveCredential(connection)) {
+      throw new HttpError(409, 'connection_active', 'Revoke this connection before permanently deleting it');
+    }
+    if (retainedConnectionData(db, [id]) > 0) {
+      throw new HttpError(409, 'connection_has_data', 'Delete this connection’s recordings, notes, and reminders before removing it');
+    }
+    db.prepare('DELETE FROM device_credentials WHERE id = ? AND owner_device_id = ?').run(id, ownerId);
+  });
+}
+
+export function deleteInactiveClientDevice(db, ownerDeviceId) {
   const id = String(ownerDeviceId || '');
   transaction(db, () => {
     const parent = db.prepare('SELECT id FROM client_devices WHERE id = ?').get(id);
     if (!parent) throw new HttpError(404, 'device_group_not_found', 'Device not found');
-    const connectionCount = db.prepare('SELECT COUNT(*) AS count FROM device_credentials WHERE owner_device_id = ?').get(id).count;
-    if (connectionCount > 0) {
-      throw new HttpError(409, 'device_group_not_empty', 'A device with connections cannot be removed');
+    const connections = db.prepare(`SELECT id, revoked_at, expires_at FROM device_credentials
+      WHERE owner_device_id = ?`).all(id);
+    if (connections.some((connection) => !inactiveCredential(connection))) {
+      throw new HttpError(409, 'device_group_has_active_connections', 'Revoke every active connection before permanently deleting this device');
     }
+    if (retainedDeviceData(db, id) > 0) {
+      throw new HttpError(409, 'device_group_has_data', 'Delete this device’s recordings, notes, and reminders before removing it');
+    }
+    db.prepare('DELETE FROM device_credentials WHERE owner_device_id = ?').run(id);
     db.prepare('DELETE FROM client_devices WHERE id = ?').run(id);
   });
 }

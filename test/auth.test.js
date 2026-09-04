@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { createNote, createReminder } from '../src/actions.js';
 import {
   createAuthenticator,
   createClientDevice,
   createDevice,
   createDeviceConnection,
+  deleteInactiveDeviceConnection,
   DeviceLimiter,
   listClientDevices,
   listDevices,
@@ -176,6 +178,47 @@ test('typed devices own independently scoped child connections', async (t) => {
     () => createDeviceConnection(value.db, value.cryptoService, other.id, { connectionType: 'mcp' }),
     (error) => error.code === 'invalid_connection_type'
   );
+});
+
+test('permanent connection deletion preserves retained recordings, notes, and reminders', (t) => {
+  const value = fixture();
+  t.after(() => value.close());
+  const parent = createClientDevice(value.db, { name: 'Retired Index', type: 'index' });
+  const created = createDeviceConnection(value.db, value.cryptoService, parent.id, {
+    connectionType: 'webhook'
+  });
+  const connectionId = created.connection.id;
+  revokeDevice(value.db, connectionId);
+  const otherParent = createClientDevice(value.db, { name: 'Other device', type: 'other' });
+  assert.throws(
+    () => deleteInactiveDeviceConnection(value.db, otherParent.id, connectionId),
+    (error) => error.status === 404 && error.code === 'device_not_found'
+  );
+  const assertProtected = () => assert.throws(
+    () => deleteInactiveDeviceConnection(value.db, parent.id, connectionId),
+    (error) => error.status === 409 && error.code === 'connection_has_data'
+  );
+  const now = new Date().toISOString();
+
+  value.db.prepare(`INSERT INTO recordings
+    (id, device_id, received_at, stt_state, idempotency_key, created_at, updated_at)
+    VALUES ('recording-cleanup', ?, ?, 'received', 'cleanup-key', ?, ?)`).run(connectionId, now, now, now);
+  assertProtected();
+  assert.ok(value.db.prepare("SELECT id FROM recordings WHERE id = 'recording-cleanup'").get());
+  value.db.prepare("DELETE FROM recordings WHERE id = 'recording-cleanup'").run();
+
+  const note = createNote(value.db, connectionId, { title: 'Keep', body: 'Retained note' });
+  assertProtected();
+  assert.ok(value.db.prepare('SELECT id FROM notes WHERE id = ?').get(note.id));
+  value.db.prepare('DELETE FROM notes WHERE id = ?').run(note.id);
+
+  const reminder = createReminder(value.db, connectionId, { title: 'Keep this reminder' });
+  assertProtected();
+  assert.ok(value.db.prepare('SELECT id FROM reminders WHERE id = ?').get(reminder.id));
+  value.db.prepare('DELETE FROM reminders WHERE id = ?').run(reminder.id);
+
+  deleteInactiveDeviceConnection(value.db, parent.id, connectionId);
+  assert.equal(value.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(connectionId), undefined);
 });
 
 test('database migration preserves legacy credential IDs and tokens idempotently', async (t) => {

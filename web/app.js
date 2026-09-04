@@ -766,6 +766,14 @@
     return scopes.includes("mcp:invoke") && !scopes.includes("webhook:write") ? "mcp" : "webhook";
   }
 
+  function connectionState(connection) {
+    const revoked = Boolean(first(connection, ["revokedAt", "revoked_at"]));
+    const expiresAt = first(connection, ["expiresAt", "expires_at"]);
+    const expiresAtMs = expiresAt ? Date.parse(expiresAt) : NaN;
+    const expired = Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
+    return { revoked, expired, inactive: revoked || expired, expiresAt };
+  }
+
   function renderDevices() {
     const query = $("#device-search").value.trim().toLowerCase();
     const devices = state.devices.filter((device) => {
@@ -795,17 +803,15 @@
       const addConnection = node("button", { class: "button button-secondary device-add-connection", type: "button", text: type === "index" ? "Add connection" : "Add token" });
       addConnection.addEventListener("click", () => showConnectionDialog(device));
       const deviceActions = [addConnection];
-      if (!connections.length) {
-        const removeDevice = node("button", { class: "button button-danger device-remove", type: "button", text: "Remove device" });
-        removeDevice.addEventListener("click", () => deleteEmptyDevice(id, name, removeDevice));
+      if (!connections.length || connections.every((connection) => connectionState(connection).inactive)) {
+        const removeDevice = node("button", { class: "button button-danger device-remove", type: "button", text: "Delete device" });
+        removeDevice.addEventListener("click", () => deleteInactiveDevice(id, name, connections.length, removeDevice));
         deviceActions.unshift(removeDevice);
       }
       const connectionRows = connections.length ? connections.map((connection) => {
         const connectionId = first(connection, ["id", "connectionId", "connection_id"]);
         const label = plainText(first(connection, ["label", "name"]), "Connection");
-        const revoked = Boolean(first(connection, ["revokedAt", "revoked_at"]));
-        const expiresAt = first(connection, ["expiresAt", "expires_at"]);
-        const expired = Boolean(expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) <= Date.now());
+        const { revoked, expired, inactive, expiresAt } = connectionState(connection);
         const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
         const trigger = plainText(first(connection, ["indexTrigger", "index_trigger"]), "");
         const connectionType = type === "index" ? indexConnectionType(connection) : "client";
@@ -814,10 +820,12 @@
         const endpointUrl = isIndexMcp
           ? connectionEndpointUrl(connection, ["mcpUrl", "mcp_url"], state.publicMcpUrl)
           : webhookUrl;
-        const revoke = node("button", { class: "mini-button mini-button-danger", type: "button", text: revoked ? "Revoked" : "Revoke", disabled: revoked });
-        revoke.addEventListener("click", () => revokeConnection(connectionId, label, revoke));
-        const actions = [revoke];
-        if (endpointUrl) {
+        const connectionAction = node("button", { class: "mini-button mini-button-danger", type: "button", text: inactive ? "Delete" : "Revoke" });
+        connectionAction.addEventListener("click", () => inactive
+          ? deleteInactiveConnection(id, connectionId, label, connectionAction)
+          : revokeConnection(connectionId, label, connectionAction));
+        const actions = [connectionAction];
+        if (endpointUrl && !inactive) {
           const copy = node("button", { class: "mini-button", type: "button", text: isIndexMcp ? "Copy MCP URL" : "Copy URL" });
           copy.addEventListener("click", () => copyText(endpointUrl, copy));
           actions.unshift(copy);
@@ -845,16 +853,33 @@
     }));
   }
 
-  async function deleteEmptyDevice(id, name, button) {
+  async function deleteInactiveDevice(id, name, connectionCount, button) {
     if (!id) return toast("This device has no identifier.", "error");
-    if (!window.confirm(`Remove ${plainText(name, "this device")}? This empty device will be removed from the list.`)) return;
-    setBusy(button, true, "Removing…");
+    const detail = connectionCount
+      ? ` This also permanently deletes its ${connectionCount} inactive ${connectionCount === 1 ? "connection" : "connections"}. Retained recordings, notes, or reminders must be deleted first.`
+      : " This empty device will be permanently removed.";
+    if (!window.confirm(`Delete ${plainText(name, "this device")}?${detail}`)) return;
+    setBusy(button, true, "Deleting…");
     try {
       await api(`/device-groups/${safeId(id)}`, { method: "DELETE" });
-      toast("Empty device removed.", "success");
+      toast("Device deleted.", "success");
       await loadDevices();
     } catch (error) {
       toast(error.message, "error");
+      setBusy(button, false);
+    }
+  }
+
+  async function deleteInactiveConnection(deviceId, connectionId, name, button) {
+    if (!deviceId || !connectionId) return toast("This connection has no identifier.", "error");
+    if (!window.confirm(`Permanently delete ${plainText(name, "this connection")}? Retained recordings, notes, or reminders must be deleted first.`)) return;
+    setBusy(button, true, "Deleting…");
+    try {
+      await api(`/device-groups/${safeId(deviceId)}/connections/${safeId(connectionId)}`, { method: "DELETE" });
+      toast("Connection deleted.", "success");
+      await loadDevices();
+    } catch (error) {
+      toast(error.message, "error", 6500);
       setBusy(button, false);
     }
   }

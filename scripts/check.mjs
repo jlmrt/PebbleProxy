@@ -52,7 +52,7 @@ assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.9["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.10["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 

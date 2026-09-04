@@ -211,7 +211,7 @@ test('admin groups typed devices with one-time child connection tokens', async (
   );
 });
 
-test('admin removes only parent devices that have no connections', async (t) => {
+test('admin permanently deletes only inactive data-free connections and devices', async (t) => {
   const app = fixture(t);
   const empty = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
     name: 'Accidental device', type: 'index'
@@ -225,6 +225,11 @@ test('admin removes only parent devices that have no connections', async (t) => 
     `/admin/api/device-groups/${populated.body.device.id}/connections`,
     { connectionType: 'mcp' }
   );
+  const note = await dispatch(app.router, 'POST', '/admin/api/notes', {
+    deviceId: connection.body.connection.id,
+    title: 'Retained note',
+    body: 'Keep this until it is deleted explicitly.'
+  });
 
   const removed = await dispatch(app.router, 'DELETE', `/admin/api/device-groups/${empty.body.device.id}`);
   assert.equal(removed.status, 200);
@@ -236,7 +241,15 @@ test('admin removes only parent devices that have no connections', async (t) => 
   );
   await assert.rejects(
     dispatch(app.router, 'DELETE', `/admin/api/device-groups/${populated.body.device.id}`),
-    (error) => error.status === 409 && error.code === 'device_group_not_empty'
+    (error) => error.status === 409 && error.code === 'device_group_has_active_connections'
+  );
+  await assert.rejects(
+    dispatch(
+      app.router,
+      'DELETE',
+      `/admin/api/device-groups/${populated.body.device.id}/connections/${connection.body.connection.id}`
+    ),
+    (error) => error.status === 409 && error.code === 'connection_active'
   );
   assert.ok(app.db.prepare('SELECT id FROM client_devices WHERE id = ?').get(populated.body.device.id));
   assert.ok(app.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(connection.body.connection.id));
@@ -244,8 +257,61 @@ test('admin removes only parent devices that have no connections', async (t) => 
   await dispatch(app.router, 'DELETE', `/admin/api/devices/${connection.body.connection.id}`);
   await assert.rejects(
     dispatch(app.router, 'DELETE', `/admin/api/device-groups/${populated.body.device.id}`),
-    (error) => error.status === 409 && error.code === 'device_group_not_empty'
+    (error) => error.status === 409 && error.code === 'device_group_has_data'
   );
+  await assert.rejects(
+    dispatch(
+      app.router,
+      'DELETE',
+      `/admin/api/device-groups/${populated.body.device.id}/connections/${connection.body.connection.id}`
+    ),
+    (error) => error.status === 409 && error.code === 'connection_has_data'
+  );
+  assert.ok(app.db.prepare('SELECT id FROM notes WHERE id = ?').get(note.body.note.id));
+
+  await dispatch(app.router, 'DELETE', `/admin/api/notes/${note.body.note.id}`);
+  const deletedConnection = await dispatch(
+    app.router,
+    'DELETE',
+    `/admin/api/device-groups/${populated.body.device.id}/connections/${connection.body.connection.id}`
+  );
+  assert.equal(deletedConnection.status, 200);
+  assert.equal(app.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(connection.body.connection.id), undefined);
+  const deletedParent = await dispatch(app.router, 'DELETE', `/admin/api/device-groups/${populated.body.device.id}`);
+  assert.equal(deletedParent.status, 200);
+
+  const expiredParent = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'Expired device', type: 'pebble'
+  });
+  const expiredConnection = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${expiredParent.body.device.id}/connections`,
+    { scopes: ['ai:chat'] }
+  );
+  app.db.prepare('UPDATE device_credentials SET expires_at = ? WHERE id = ?')
+    .run('2020-01-01T00:00:00.000Z', expiredConnection.body.connection.id);
+  const deletedExpired = await dispatch(
+    app.router,
+    'DELETE',
+    `/admin/api/device-groups/${expiredParent.body.device.id}/connections/${expiredConnection.body.connection.id}`
+  );
+  assert.equal(deletedExpired.status, 200);
+
+  const retiredParent = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'Retired device', type: 'index'
+  });
+  const retiredConnection = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${retiredParent.body.device.id}/connections`,
+    { connectionType: 'webhook' }
+  );
+  await dispatch(app.router, 'DELETE', `/admin/api/devices/${retiredConnection.body.connection.id}`);
+  const deletedRetired = await dispatch(app.router, 'DELETE', `/admin/api/device-groups/${retiredParent.body.device.id}`);
+  assert.equal(deletedRetired.status, 200);
+  assert.equal(app.db.prepare('SELECT id FROM client_devices WHERE id = ?').get(retiredParent.body.device.id), undefined);
+  assert.equal(app.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(retiredConnection.body.connection.id), undefined);
 });
 
 test('admin exposes and persists exact public client endpoints', async (t) => {
