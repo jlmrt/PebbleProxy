@@ -24,7 +24,7 @@ function fixture() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pebble-proxy-auth-'));
   const db = createDatabase(path.join(directory, 'db.sqlite'));
   const cryptoService = createCryptoService({ dataDir: directory, appSeed: 'unit-test-seed' });
-  return { directory, db, cryptoService, close() { db.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
+  return { directory, db, cryptoService, close() { this.db.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
 }
 
 test('device tokens are scoped, stored hashed, revocable, and reset sessions', async (t) => {
@@ -180,7 +180,7 @@ test('typed devices own independently scoped child connections', async (t) => {
   );
 });
 
-test('permanent connection deletion preserves retained recordings, notes, and reminders', (t) => {
+test('permanent connection deletion preserves retained recordings, notes, and reminders', async (t) => {
   const value = fixture();
   t.after(() => value.close());
   const parent = createClientDevice(value.db, { name: 'Retired Index', type: 'index' });
@@ -194,31 +194,39 @@ test('permanent connection deletion preserves retained recordings, notes, and re
     () => deleteInactiveDeviceConnection(value.db, otherParent.id, connectionId),
     (error) => error.status === 404 && error.code === 'device_not_found'
   );
-  const assertProtected = () => assert.throws(
-    () => deleteInactiveDeviceConnection(value.db, parent.id, connectionId),
-    (error) => error.status === 409 && error.code === 'connection_has_data'
-  );
   const now = new Date().toISOString();
 
   value.db.prepare(`INSERT INTO recordings
     (id, device_id, received_at, stt_state, idempotency_key, created_at, updated_at)
     VALUES ('recording-cleanup', ?, ?, 'received', 'cleanup-key', ?, ?)`).run(connectionId, now, now, now);
-  assertProtected();
-  assert.ok(value.db.prepare("SELECT id FROM recordings WHERE id = 'recording-cleanup'").get());
-  value.db.prepare("DELETE FROM recordings WHERE id = 'recording-cleanup'").run();
-
   const note = createNote(value.db, connectionId, { title: 'Keep', body: 'Retained note' });
-  assertProtected();
-  assert.ok(value.db.prepare('SELECT id FROM notes WHERE id = ?').get(note.id));
-  value.db.prepare('DELETE FROM notes WHERE id = ?').run(note.id);
-
   const reminder = createReminder(value.db, connectionId, { title: 'Keep this reminder' });
-  assertProtected();
-  assert.ok(value.db.prepare('SELECT id FROM reminders WHERE id = ?').get(reminder.id));
-  value.db.prepare('DELETE FROM reminders WHERE id = ?').run(reminder.id);
 
   deleteInactiveDeviceConnection(value.db, parent.id, connectionId);
-  assert.equal(value.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(connectionId), undefined);
+  const retired = value.db.prepare('SELECT * FROM device_credentials WHERE id = ?').get(connectionId);
+  assert.ok(retired.deleted_at);
+  assert.equal(retired.secret_prefix, 'deleted');
+  assert.equal(listDevices(value.db).some((device) => device.id === connectionId), false);
+  assert.ok(value.db.prepare("SELECT id FROM recordings WHERE id = 'recording-cleanup'").get());
+  assert.ok(value.db.prepare('SELECT id FROM notes WHERE id = ?').get(note.id));
+  assert.ok(value.db.prepare('SELECT id FROM reminders WHERE id = ?').get(reminder.id));
+
+  value.db.close();
+  value.db = createDatabase(path.join(value.directory, 'db.sqlite'));
+  assert.equal(listDevices(value.db).some((device) => device.id === connectionId), false);
+  assert.ok(value.db.prepare("SELECT id FROM recordings WHERE id = 'recording-cleanup'").get());
+  assert.ok(value.db.prepare('SELECT id FROM notes WHERE id = ?').get(note.id));
+  assert.ok(value.db.prepare('SELECT id FROM reminders WHERE id = ?').get(reminder.id));
+
+  const authenticate = createAuthenticator({ db: value.db, cryptoService: value.cryptoService });
+  await assert.rejects(
+    authenticate({ headers: { authorization: `Bearer ${created.token}` } }, 'webhook:write'),
+    (error) => error.status === 401 && error.code === 'invalid_api_key'
+  );
+  assert.throws(
+    () => deleteInactiveDeviceConnection(value.db, parent.id, connectionId),
+    (error) => error.status === 404 && error.code === 'device_not_found'
+  );
 });
 
 test('database migration preserves legacy credential IDs and tokens idempotently', async (t) => {

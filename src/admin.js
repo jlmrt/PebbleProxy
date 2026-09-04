@@ -352,19 +352,19 @@ function adminDeviceGroupView(device, publicBaseUrl) {
 function overview(db, config) {
   const count = (table, where = '') => db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count;
   const activeConnections = db.prepare(`SELECT COUNT(*) AS count FROM device_credentials
-    WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`).get(nowIso()).count;
+    WHERE deleted_at IS NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`).get(nowIso()).count;
   const stt = db.prepare('SELECT health_status, enabled FROM stt_config WHERE id = 1').get();
   const tts = db.prepare('SELECT health_status, enabled FROM tts_config WHERE id = 1').get();
   const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0-test.10',
+    version: '0.1.0-test.12',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,
     connectivity,
     counts: {
-      devices: count('client_devices'),
+      devices: count('client_devices', 'WHERE deleted_at IS NULL'),
       activeConnections,
       activeDevices: activeConnections,
       backends: count('ai_providers', 'WHERE enabled = 1'),
@@ -653,7 +653,8 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     if (!body || body.length > 8000) throw new HttpError(400, 'invalid_note', 'Note body is required and must be at most 8000 characters');
     if (title && title.length > 120) throw new HttpError(400, 'invalid_note', 'Note title must be at most 120 characters');
     if (!input.deviceId) throw new HttpError(400, 'device_required', 'Select the device that owns this note');
-    const device = db.prepare('SELECT id FROM device_credentials WHERE id = ? AND revoked_at IS NULL').get(String(input.deviceId));
+    const device = db.prepare(`SELECT id FROM device_credentials
+      WHERE id = ? AND revoked_at IS NULL AND deleted_at IS NULL`).get(String(input.deviceId));
     if (!device) throw new HttpError(400, 'device_required', 'Select an active device for this note');
     const note = createNote(db, device.id, { title, body });
     sendJson(res, 201, { note });
@@ -682,7 +683,8 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
       dueAt = due.toISOString();
     }
     if (!input.deviceId) throw new HttpError(400, 'device_required', 'Select the device that owns this reminder');
-    const device = db.prepare('SELECT id FROM device_credentials WHERE id = ? AND revoked_at IS NULL').get(String(input.deviceId));
+    const device = db.prepare(`SELECT id FROM device_credentials
+      WHERE id = ? AND revoked_at IS NULL AND deleted_at IS NULL`).get(String(input.deviceId));
     if (!device) throw new HttpError(400, 'device_required', 'Select an active device for this reminder');
     const reminder = createReminder(db, device.id, {
       title,

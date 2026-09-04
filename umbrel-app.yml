@@ -2,7 +2,7 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.10"
+version: "0.1.0-test.12"
 tagline: A private voice and AI gateway for Pebble apps
 icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
@@ -23,6 +23,6 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Adds guarded cleanup for revoked or expired connections and retired devices. Active connections
-  cannot be permanently deleted, and devices with active connections or retained recordings,
-  notes, or reminders remain protected until those items are removed explicitly.
+  Matches Index capture behavior by saving ordinary voice captures as notes without requiring
+  command words, while still routing clear reminder intent. Notes keep the complete original
+  transcript, and transcript action controls remain compact on mobile.

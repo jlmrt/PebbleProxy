@@ -52,7 +52,7 @@ assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.10["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.12["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -88,7 +88,7 @@ for (const [name, source] of [['web/index.html', html], ['web/app.js', browserSc
 }
 assert.match(browserStyles, /font-size:\s*max\(1rem, 16px\)/,
   'Editable controls need a 16px iOS Safari font-size floor');
-for (const id of ['device-form', 'connection-form', 'backend-form', 'alias-form', 'note-form', 'reminder-form']) {
+for (const id of ['processing-form', 'device-form', 'connection-form', 'backend-form', 'alias-form', 'note-form', 'reminder-form']) {
   const form = html.match(new RegExp(`<form[^>]+id="${id}"[\\s\\S]*?<\\/form>`))?.[0] || '';
   const controls = form.match(/<button\b[^>]*\bdata-dialog-dismiss\b[^>]*>/g) || [];
   assert.equal(controls.length, 2, `${id} must have two dialog dismiss controls`);

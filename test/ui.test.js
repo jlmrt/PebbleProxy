@@ -7,7 +7,7 @@ const styles = fs.readFileSync(new URL('../web/styles.css', import.meta.url), 'u
 const script = fs.readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 
 test('every form dialog has non-submit dismiss controls', () => {
-  for (const id of ['device-form', 'connection-form', 'backend-form', 'alias-form', 'note-form', 'reminder-form']) {
+  for (const id of ['processing-form', 'device-form', 'connection-form', 'backend-form', 'alias-form', 'note-form', 'reminder-form']) {
     const form = html.match(new RegExp(`<form[^>]+id="${id}"[\\s\\S]*?<\\/form>`))?.[0] || '';
     const dismissControls = form.match(/<button\b[^>]*\bdata-dialog-dismiss\b[^>]*>/g) || [];
     assert.equal(dismissControls.length, 2, `${id} must have × and Cancel dismiss controls`);
@@ -41,12 +41,28 @@ test('device and Needle diagnostics UI use the nested API contracts', () => {
   assert.match(script, /\/device-groups\/\$\{safeId\(deviceId\)\}\/connections\/\$\{safeId\(connectionId\)\}/);
   assert.match(script, /text: inactive \? "Delete" : "Revoke"/);
   assert.match(script, /connections\.every\(\(connection\) => connectionState\(connection\)\.inactive\)/);
+  assert.match(script, /Recordings, notes, and reminders are kept\./);
+  assert.match(script, /Its recordings, notes, and reminders are kept\./);
+  assert.doesNotMatch(script, /Retained recordings, notes, or reminders must be deleted first\./);
   assert.match(script, /body\.connectionType = plainText\(data\.get\("connectionType"\), "webhook"\)/);
   assert.match(script, /if \(body\.connectionType === "webhook"\) body\.indexTrigger/);
   assert.match(script, /Pebble Index custom MCP server/);
   assert.match(script, /\["proxy_decision"\]/);
   assert.match(script, /\["verification"\]/);
   assert.match(script, /Raw router response/);
+});
+
+test('transcript actions keep decisions near the top and move settings behind a persistent compact control', () => {
+  const processingPage = html.match(/<section class="page" id="page-processing"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.match(processingPage, /id="processing-enabled"/);
+  assert.match(processingPage, /id="open-processing-settings"/);
+  assert.match(processingPage, /id="dismiss-processing-info"/);
+  assert.match(processingPage, /Recent decisions/);
+  assert.doesNotMatch(processingPage, /Reminders are stored/);
+  assert.doesNotMatch(processingPage, /processing-health-orb/);
+  assert.match(html, /<dialog class="modal" id="processing-dialog">[\s\S]*?id="processing-form"/);
+  assert.match(script, /localStorage\.setItem\(PROCESSING_INFO_DISMISSED_KEY, "1"\)/);
+  assert.match(script, /textContent = "Healthy"/);
 });
 
 test('one-time token fields are scrubbed on every permitted dialog close path', () => {

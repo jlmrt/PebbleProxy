@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.10">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.12">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -366,34 +366,20 @@
           </section>
 
           <section class="page" id="page-processing" data-page="processing" hidden>
-            <div class="section-toolbar">
-              <div><h2>Transcript actions</h2><p>Use local Needle inference to turn new Index transcripts into one trusted action.</p></div>
-              <div class="health-summary"><span class="status-dot status-unknown" id="processing-health-dot"></span><span id="processing-health-label">Not checked</span></div>
+            <div class="section-toolbar processing-toolbar">
+              <div><h2>Transcript actions</h2><p>Turn new Index transcripts into notes, reminders, or an agent request.</p></div>
+              <div class="processing-page-actions">
+                <div class="health-summary" id="processing-health-summary"><span class="status-dot status-unknown" id="processing-health-dot"></span><span id="processing-health-label">Checking</span></div>
+                <label class="switch processing-switch"><input type="checkbox" id="processing-enabled"><span></span><b>Enabled</b></label>
+                <button class="icon-button" id="open-processing-settings" type="button" aria-label="Transcript action settings" title="Transcript action settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2-1.6-2-3.4-2.5 1a7.5 7.5 0 0 0-1.7-1L14.8 3h-4l-.4 2.8a7.5 7.5 0 0 0-1.7 1L6.2 5.9l-2 3.4 2 1.6a7.8 7.8 0 0 0 0 2l-2 1.6 2 3.4 2.5-1a7.5 7.5 0 0 0 1.7 1l.4 2.8h4l.4-2.8a7.5 7.5 0 0 0 1.7-1l2.5 1 2-3.4-2-1.6ZM12.8 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></button>
+              </div>
             </div>
-            <article class="info-strip info-strip-accent">
+            <article class="info-strip info-strip-accent" id="processing-info">
               <span aria-hidden="true">N</span>
-              <p>Needle runs in an isolated local container with telemetry and runtime downloads disabled. It can propose one note, reminder, or agent forward. Pebble Proxy validates the proposal and performs the action.</p>
+              <p>Needle runs locally. Pebble Proxy checks each proposal and creates at most one action per recording.</p>
+              <button class="info-strip-dismiss" id="dismiss-processing-info" type="button" aria-label="Dismiss this message" title="Dismiss">×</button>
             </article>
-            <article class="info-strip"><span aria-hidden="true">i</span><p>Reminders are stored in Pebble Proxy’s local organizer. This build does not create a native phone reminder or send a phone notification.</p></article>
-            <div class="content-grid settings-grid">
-              <form class="panel settings-form" id="processing-form">
-                <div class="panel-header"><div><span class="eyebrow">Local intent router</span><h3>Needle transcript processing</h3></div><label class="switch"><input type="checkbox" name="enabled" id="processing-enabled"><span></span><b>Enabled</b></label></div>
-                <div class="field-grid">
-                  <label class="field"><span>Confidence threshold</span><input name="confidenceThreshold" id="processing-confidence" type="number" min="0.05" max="0.99" step="0.01" value="0.20" required><small>Lower-confidence decisions are held for review. The bundled base model starts at 0.20.</small></label>
-                  <label class="field"><span>Agent alias <em>optional</em></span><select name="agentAlias" id="processing-agent-alias"><option value="">Do not forward to an agent</option></select><small>Required only when Needle chooses agent forwarding.</small></label>
-                </div>
-                <p class="helper">Enabling this affects new transcripts received afterward. At most one action is created per recording.</p>
-                <div class="form-actions"><button class="button button-secondary" id="test-processing" type="button">Test Needle</button><button class="button button-primary" type="submit">Save settings</button></div>
-              </form>
-              <aside class="panel health-panel">
-                <span class="eyebrow">Router health</span>
-                <div class="health-orb" id="processing-health-orb"><span></span></div>
-                <h3 id="processing-health-title">Waiting for a health check</h3>
-                <p id="processing-health-message">Test the bundled Needle service before enabling automatic actions.</p>
-                <div class="privacy-note"><strong>Create only</strong><p>This release cannot edit or delete notes and reminders. Ambiguous, unsupported, and interrupted actions stay visible for review.</p></div>
-              </aside>
-            </div>
-            <div class="section-toolbar subsection-toolbar"><div><h2>Recent decisions</h2><p>The selected transcript source, confidence, proposed action, and outcome are retained locally.</p></div></div>
+            <div class="section-toolbar subsection-toolbar processing-decisions-toolbar"><div><h2>Recent decisions</h2><p>Open a decision to inspect its transcript, proposal, and result.</p></div></div>
             <div class="panel table-panel"><div id="processing-jobs" class="data-list" aria-live="polite"></div></div>
           </section>
 
@@ -419,6 +405,19 @@
         </main>
       </div>
     </div>
+
+    <dialog class="modal" id="processing-dialog">
+      <form method="dialog" class="modal-card processing-settings-form" id="processing-form">
+        <div class="modal-header"><div><span class="eyebrow">Transcript actions</span><h2>Needle settings</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
+        <p class="modal-intro">Tune action routing or test the local router.</p>
+        <div class="field-grid">
+          <label class="field"><span>Confidence threshold</span><input name="confidenceThreshold" id="processing-confidence" type="number" min="0.05" max="0.99" step="0.01" value="0.20" required><small>Low-scored actions are reviewed unless they can be safely captured from the original transcript.</small></label>
+          <label class="field"><span>Agent alias <em>optional</em></span><select name="agentAlias" id="processing-agent-alias"><option value="">Do not forward to an agent</option></select><small>Used only when Needle chooses agent forwarding.</small></label>
+        </div>
+        <p class="helper">Changes apply to transcripts received after saving.</p>
+        <div class="modal-actions"><button class="button button-secondary" id="test-processing" type="button">Test Needle</button><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Save settings</button></div>
+      </form>
+    </dialog>
 
     <dialog class="modal" id="device-dialog">
       <form method="dialog" class="modal-card" id="device-form">
@@ -545,7 +544,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.10" defer></script>
-    <script src="/app.js?v=0.1.0-test.10" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.12" defer></script>
+    <script src="/app.js?v=0.1.0-test.12" defer></script>
   </body>
 </html>

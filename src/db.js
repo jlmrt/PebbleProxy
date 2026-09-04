@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS client_devices (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('index','pebble','other')),
+  deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS device_credentials (
   session_epoch INTEGER NOT NULL DEFAULT 1,
   expires_at TEXT,
   revoked_at TEXT,
+  deleted_at TEXT,
   last_used_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -273,7 +275,8 @@ function migrateCredentialOwners(db) {
       c.created_at, c.updated_at
     FROM device_credentials c
     LEFT JOIN client_devices d ON d.id = c.owner_device_id
-    WHERE c.owner_device_id IS NULL OR trim(c.connection_label) = '' OR d.id IS NULL`).all();
+    WHERE c.deleted_at IS NULL
+      AND (c.owner_device_id IS NULL OR trim(c.connection_label) = '' OR d.id IS NULL)`).all();
   if (!credentials.length) return;
 
   transaction(db, () => {
@@ -304,9 +307,11 @@ export function createDatabase(databasePath) {
   db.exec('PRAGMA foreign_keys=ON;');
   db.exec('PRAGMA busy_timeout=5000;');
   db.exec(SCHEMA);
+  ensureColumn(db, 'client_devices', 'deleted_at', 'TEXT');
   ensureColumn(db, 'device_credentials', 'owner_device_id', 'TEXT REFERENCES client_devices(id)');
   ensureColumn(db, 'device_credentials', 'connection_label', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'device_credentials', 'index_trigger', "TEXT CHECK(index_trigger IS NULL OR index_trigger IN ('single-click-hold','double-click-hold','all'))");
+  ensureColumn(db, 'device_credentials', 'deleted_at', 'TEXT');
   ensureColumn(db, 'recordings', 'trigger', 'TEXT');
   ensureColumn(db, 'reminders', 'due_text', 'TEXT');
   migrateCredentialOwners(db);

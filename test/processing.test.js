@@ -8,6 +8,23 @@ import { createCryptoService } from '../src/crypto.js';
 import { createDatabase, nowIso } from '../src/db.js';
 import { enqueueProcessingJob, listProcessingJobs, startProcessingWorker } from '../src/processing.js';
 
+test('Needle follows Index default-capture routing and permits reminders without a time', () => {
+  const source = fs.readFileSync(new URL('../needle-sidecar/server.py', import.meta.url), 'utf8');
+  const note = source.match(/"name": "create_note",[\s\S]*?(?=\n    \{\n        "name": "create_reminder")/)?.[0] || '';
+  const reminder = source.match(/"name": "create_reminder",[\s\S]*?(?=\n    \{\n        "name": "forward_agent")/)?.[0] || '';
+  assert.match(source, /"tool_schema_version": "3"/);
+  assert.match(source, /ambiguous thoughts and observations default to create_note/);
+  assert.match(source, /without requiring action words such as 'create a note'/);
+  assert.match(source, /future date or time paired with a task/);
+  assert.match(source, /always choose an action, falling back to create_note/);
+  assert.match(source, /"maxLength": 8000/);
+  assert.match(note, /The user's complete input/);
+  assert.doesNotMatch(note, /"title"/);
+  assert.match(reminder, /"required": \["message"\]/);
+  assert.doesNotMatch(reminder, /"required": \["message", "date_time_human"\]/);
+  assert.doesNotMatch(source, /never fire alerts|needs both a message and a time phrase/i);
+});
+
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -92,7 +109,7 @@ test('Needle processing creates one device-scoped note and records the decision'
   assert.equal(app.requests[0].body.text, app.transcript);
   assert.equal(app.requests[0].body.context.trigger, 'double-click-hold');
   assert.equal(app.requests[0].body.context.date, app.recordedAt);
-  assert.equal(app.db.prepare('SELECT body FROM notes').get().body, 'The blue door code is 4815');
+  assert.equal(app.db.prepare('SELECT body FROM notes').get().body, app.transcript);
   const job = app.db.prepare('SELECT transcript_source, confidence, status FROM processing_jobs').get();
   assert.deepEqual({ ...job }, { transcript_source: 'pebble', confidence: 0.94, status: 'completed' });
   const action = app.db.prepare('SELECT action_type, status FROM processing_actions').get();
@@ -130,6 +147,27 @@ test('Needle processing preserves a reminder time phrase without inventing a tim
     title: 'call Sam',
     due_at: null,
     due_text: '4 PM on September 8 2026'
+  });
+});
+
+test('Needle processing accepts a reminder without a spoken time', async (t) => {
+  const app = fixture(t, {
+    type: 'call',
+    function_calls: [{
+      name: 'create_reminder',
+      arguments: { message: 'email the project update to the team' }
+    }],
+    confidence: 0.91
+  }, 'Remind me to email the project update to the team');
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  const reminder = app.db.prepare('SELECT title, due_at, due_text FROM reminders').get();
+  assert.deepEqual({ ...reminder }, {
+    title: 'email the project update to the team',
+    due_at: null,
+    due_text: null
   });
 });
 
@@ -183,7 +221,7 @@ test('a verified explicit reminder can safely recover from low Needle confidence
       explicitCommandPrefix: true,
       onlyExpectedValidation: true,
       onlyMessageUngrounded: true,
-      dateTimeExactSubstring: true,
+      dateTimeExactSubstringOrOmitted: true,
       noSecondExplicitCommand: true,
       derivedTitleAvailable: true
     },
@@ -197,7 +235,7 @@ test('a verified explicit reminder can safely recover from low Needle confidence
   assert.equal(JSON.stringify(decisionLog).includes('bookstore'), false);
 });
 
-test('a verified explicit note uses only the original transcript after a low-confidence rewrite', async (t) => {
+test('a low-confidence note intent uses only the original transcript', async (t) => {
   const transcript = 'Take a note that the blue bicycle lock code is 4815.';
   const app = fixture(t, {
     type: 'call',
@@ -216,29 +254,139 @@ test('a verified explicit note uses only the original transcript after a low-con
   const note = app.db.prepare('SELECT title, body FROM notes').get();
   assert.deepEqual({ ...note }, {
     title: 'the blue bicycle lock code is 4815.',
-    body: 'the blue bicycle lock code is 4815.'
+    body: transcript
   });
   assert.equal(JSON.stringify(note).includes('rewritten'), false);
   const [job] = listProcessingJobs(app.db);
-  assert.equal(job.verification.policy, 'explicit_note_v1');
+  assert.equal(job.verification.policy, 'default_note_capture_v1');
   assert.equal(job.verification.outcome, 'accepted');
   assert.deepEqual(job.action.arguments, { ...note });
-  assert.equal(app.logs.find((entry) => entry.message === 'processing_decision').fields.reasonCode, 'verified_explicit_note');
+  assert.equal(app.logs.find((entry) => entry.message === 'processing_decision').fields.reasonCode, 'default_note_capture');
 });
 
-test('unsafe low-confidence note proposals still require review', async (t) => {
+test('Create a note followed by sentence punctuation is recovered from the original transcript', async (t) => {
+  const transcript = 'Create a note. The community garden opens in April. Volunteers meet on Saturday mornings.';
+  const app = fixture(t, {
+    type: 'call',
+    success: true,
+    function_calls: [{
+      name: 'create_note',
+      arguments: { text: 'garden opens April' }
+    }],
+    confidence: 0.0002,
+    validation: { ungrounded: ['create_note.text'], negation: false }
+  }, transcript);
+
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  const note = app.db.prepare('SELECT title, body FROM notes').get();
+  assert.deepEqual({ ...note }, {
+    title: 'The community garden opens in April.',
+    body: transcript
+  });
+  assert.equal(note.body.includes('Volunteers meet on Saturday mornings.'), true);
+  assert.notEqual(note.body, 'garden opens April');
+});
+
+test('a clear Create note command still works when speech transcription omits punctuation', async (t) => {
+  const app = fixture(t, {
+    type: 'call',
+    success: true,
+    function_calls: [],
+    confidence: 0.9
+  }, 'Create a note the community garden gate code is 4815');
+
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  assert.deepEqual({ ...app.db.prepare('SELECT title, body FROM notes').get() }, {
+    title: 'the community garden gate code is 4815',
+    body: 'Create a note the community garden gate code is 4815'
+  });
+});
+
+test('an explicit reminder is stored when Needle incorrectly returns no action', async (t) => {
+  const transcript = 'Remind me in five days from now to email the project update to the team.';
+  const app = fixture(t, {
+    type: 'call',
+    success: true,
+    function_calls: [],
+    reasoning: 'The available reminder action was not selected.',
+    confidence: 0.9491
+  }, transcript);
+
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  const reminder = app.db.prepare('SELECT title, due_at, due_text FROM reminders').get();
+  assert.deepEqual({ ...reminder }, {
+    title: 'email the project update to the team.',
+    due_at: null,
+    due_text: 'in five days from now'
+  });
+  const [job] = listProcessingJobs(app.db);
+  assert.equal(job.verification.policy, 'default_capture_v1');
+  assert.equal(job.verification.outcome, 'accepted');
+  assert.deepEqual(job.action.arguments, {
+    title: 'email the project update to the team.',
+    due_text: 'in five days from now'
+  });
+  assert.equal(app.logs.find((entry) => entry.message === 'processing_decision').fields.reasonCode, 'verified_explicit_reminder');
+});
+
+test('Create a reminder phrasing is recovered from a no-action response', async (t) => {
+  const app = fixture(t, {
+    type: 'call',
+    success: true,
+    function_calls: [],
+    confidence: 0.92
+  }, 'Create a reminder for tomorrow to buy oat milk.');
+
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  assert.deepEqual({ ...app.db.prepare('SELECT title, due_at, due_text FROM reminders').get() }, {
+    title: 'buy oat milk.',
+    due_at: null,
+    due_text: 'for tomorrow'
+  });
+});
+
+test('a no-action response falls back to a note without requiring command words', async (t) => {
+  const transcript = 'The blue door at the community center sticks during wet weather.';
+  const app = fixture(t, {
+    type: 'call',
+    success: true,
+    function_calls: [],
+    reasoning: 'No supported action identified.',
+    confidence: 0.95
+  }, transcript);
+
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+  await stop();
+
+  assert.deepEqual({ ...app.db.prepare('SELECT title, body FROM notes').get() }, {
+    title: transcript,
+    body: transcript
+  });
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM reminders').get().count, 0);
+  const [job] = listProcessingJobs(app.db);
+  assert.equal(job.verification.policy, 'default_note_capture_v1');
+  assert.equal(job.verification.outcome, 'accepted');
+  assert.equal(job.verification.action_source, 'default_note_fallback');
+});
+
+test('default note capture keeps the complete transcript without trusting Needle note fields', async (t) => {
   const cases = [
-    ['bare note phrase', 'Take a note play C sharp.', { ungrounded: ['create_note.text'] }],
-    ['notebook prefix', 'Notebook: buy milk', { ungrounded: ['create_note.text'] }],
-    ['empty remainder', 'Note:', { ungrounded: ['create_note.text'] }],
-    ['mixed validation field', 'Note: buy milk', { ungrounded: ['create_note.text', 'create_reminder.message'] }],
-    ['negated validation', 'Note: buy milk', { ungrounded: ['create_note.text'], negation: true }],
-    ['string negation', 'Note: buy milk', { ungrounded: ['create_note.text'], negation: 'false' }],
-    ['numeric negation', 'Note: buy milk', { ungrounded: ['create_note.text'], negation: 0 }],
-    ['null negation', 'Note: buy milk', { ungrounded: ['create_note.text'], negation: null }],
-    ['unexpected validation flag', 'Note: buy milk', { ungrounded: ['create_note.text'], unsafe: true }],
-    ['second reminder command', 'Note: buy milk and remind me tomorrow', { ungrounded: ['create_note.text'] }],
-    ['overlength remainder', `Note: ${'a'.repeat(8001)}`, { ungrounded: ['create_note.text'] }]
+    ['plain thought', 'The community garden gate sticks after rain.', { ungrounded: ['create_note.text'] }],
+    ['spoken note wording', 'Take a note that the studio key is in the blue drawer.', { ungrounded: ['create_note.text'] }],
+    ['unexpected validation metadata', 'The project is waiting on final artwork.', { ungrounded: ['create_note.text'], unsafe: true }]
   ];
   for (const [name, transcript, validation] of cases) {
     await t.test(name, async (t) => {
@@ -249,8 +397,82 @@ test('unsafe low-confidence note proposals still require review', async (t) => {
         validation
       }, transcript);
       const stop = startProcessingWorker(app.deps);
-      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'needs_review');
+      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
       await stop();
+      const note = app.db.prepare('SELECT body FROM notes').get();
+      assert.equal(note.body, transcript);
+      assert.equal(note.body.includes('rewritten'), false);
+      const [job] = listProcessingJobs(app.db);
+      assert.equal(job.verification.policy, 'default_note_capture_v1');
+      assert.equal(job.verification.outcome, 'accepted');
+    });
+  }
+});
+
+test('default note capture still rejects a transcript that exceeds organizer limits', async (t) => {
+  const app = fixture(t, {
+    type: 'call',
+    function_calls: [{ name: 'create_note', arguments: { text: 'shortened' } }],
+    confidence: 0,
+    validation: { ungrounded: ['create_note.text'] }
+  }, `A${'a'.repeat(8000)}`);
+  const stop = startProcessingWorker(app.deps);
+  await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'needs_review');
+  await stop();
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM notes').get().count, 0);
+});
+
+test('reminder intent does not depend on exact command words', async (t) => {
+  const cases = [
+    {
+      name: 'polite reminder request',
+      transcript: 'Could you remind me in five days to check the sale?',
+      decision: {
+        type: 'call',
+        function_calls: [{
+          name: 'create_reminder',
+          arguments: { message: 'check the sale', date_time_human: 'in five days' }
+        }],
+        confidence: 0,
+        validation: { ungrounded: ['create_reminder.message'] }
+      },
+      title: 'check the sale?',
+      dueText: 'in five days'
+    },
+    {
+      name: 'future time and task',
+      transcript: 'Tomorrow at 2 PM, call the bank.',
+      decision: {
+        type: 'call',
+        function_calls: [{
+          name: 'create_reminder',
+          arguments: { message: 'call the bank', date_time_human: 'Tomorrow at 2 PM' }
+        }],
+        confidence: 0,
+        validation: { ungrounded: ['create_reminder.message', 'create_reminder.date_time_human'] }
+      },
+      title: 'call the bank',
+      dueText: 'Tomorrow at 2 PM'
+    },
+    {
+      name: 'remember to task with no time',
+      transcript: 'Remember to send the project update.',
+      decision: { type: 'call', function_calls: [], confidence: 0.9 },
+      title: 'send the project update.',
+      dueText: null
+    }
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async (t) => {
+      const app = fixture(t, item.decision, item.transcript);
+      const stop = startProcessingWorker(app.deps);
+      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
+      await stop();
+      assert.deepEqual({ ...app.db.prepare('SELECT title, due_text FROM reminders').get() }, {
+        title: item.title,
+        due_text: item.dueText
+      });
       assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM notes').get().count, 0);
     });
   }
@@ -258,18 +480,6 @@ test('unsafe low-confidence note proposals still require review', async (t) => {
 
 test('unsafe low-confidence reminder proposals still require review', async (t) => {
   const cases = [
-    {
-      name: 'command does not start with remind me',
-      transcript: 'Could you remind me in five days to check the sale?',
-      date: 'in five days',
-      validation: { ungrounded: ['create_reminder.message'] }
-    },
-    {
-      name: 'Needle also marks the time as ungrounded',
-      transcript: 'Remind me in five days to check the sale.',
-      date: 'in five days',
-      validation: { ungrounded: ['create_reminder.message', 'create_reminder.date_time_human'] }
-    },
     {
       name: 'the returned time is not an exact transcript substring',
       transcript: 'Remind me in five days to check the sale.',
@@ -336,18 +546,17 @@ test('unsafe low-confidence reminder proposals still require review', async (t) 
   }
 });
 
-test('low-confidence and multiple Needle calls require review without executing actions', async (t) => {
-  await t.test('low confidence', async (t) => {
+test('note capture is confidence-independent while ambiguous multiple actions still require review', async (t) => {
+  await t.test('low-confidence note', async (t) => {
     const app = fixture(t, {
       type: 'call',
       function_calls: [{ name: 'create_note', arguments: { text: 'Uncertain' } }],
       confidence: 0.1
     });
     const stop = startProcessingWorker(app.deps);
-    await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'needs_review');
+    await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
     await stop();
-    assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM notes').get().count, 0);
-    assert.equal(app.db.prepare('SELECT last_error_code FROM processing_jobs').get().last_error_code, 'low_confidence');
+    assert.equal(app.db.prepare('SELECT body FROM notes').get().body, app.transcript);
   });
 
   await t.test('missing confidence', async (t) => {
@@ -356,14 +565,13 @@ test('low-confidence and multiple Needle calls require review without executing 
       function_calls: [{ name: 'create_note', arguments: { text: 'Unscored' } }]
     });
     const stop = startProcessingWorker(app.deps);
-    await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'needs_review');
+    await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
     await stop();
-    assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM notes').get().count, 0);
+    assert.equal(app.db.prepare('SELECT body FROM notes').get().body, app.transcript);
     const [job] = listProcessingJobs(app.db);
     assert.equal(job.confidence, null);
-    assert.equal(job.verification.policy, 'confidence_required_v1');
-    assert.equal(job.verification.outcome, 'rejected');
-    assert.equal(job.verification.checks.confidenceAvailable, false);
+    assert.equal(job.verification.policy, 'default_note_capture_v1');
+    assert.equal(job.verification.outcome, 'accepted');
   });
 
   for (const confidence of [-0.01, 1.01]) {
@@ -373,18 +581,16 @@ test('low-confidence and multiple Needle calls require review without executing 
         function_calls: [{ name: 'create_note', arguments: { text: 'Must not execute' } }],
         confidence,
         validation: { ungrounded: ['create_note.text'], negation: false }
-      }, 'Note: this out-of-range decision must not execute.');
+      }, 'Note: this thought should still be captured verbatim.');
       const stop = startProcessingWorker(app.deps);
-      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'needs_review');
+      await waitFor(() => app.db.prepare('SELECT status FROM processing_jobs').get()?.status === 'completed');
       await stop();
-      assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM notes').get().count, 0);
-      assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM processing_actions').get().count, 0);
+      assert.equal(app.db.prepare('SELECT body FROM notes').get().body, app.transcript);
+      assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM processing_actions').get().count, 1);
       const [job] = listProcessingJobs(app.db);
       assert.equal(job.confidence, null);
-      assert.equal(job.error.code, 'low_confidence');
-      assert.equal(job.verification.policy, 'confidence_required_v1');
-      assert.equal(job.verification.outcome, 'rejected');
-      assert.equal(job.verification.checks.confidenceAvailable, false);
+      assert.equal(job.verification.policy, 'default_note_capture_v1');
+      assert.equal(job.verification.outcome, 'accepted');
     });
   }
 

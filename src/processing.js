@@ -167,10 +167,82 @@ function safeMessage(value, fallback = 'Transcript processing failed') {
     .slice(0, 500);
 }
 
+const REMINDER_COMMAND_PREFIX = /^\s*(?:(?:(?:could|can|would)\s+you\s+)?please\s+|(?:(?:could|can|would)\s+you\s+))?(?:remind\s+me\b|(?:(?:i\s+(?:need|want)\s+to\s+)?remember\s+to)\b|(?:(?:create|add|set|save)\s+(?:a\s+)?reminder)\b(?=(?:\s+\S|\s*[,;:\-.!?\u2013\u2014])))\s*[,;:\-.!?\u2013\u2014]?\s*/iu;
+const NOTE_TITLE_PREFIX = /^\s*(?:please\s+)?(?:(?:(?:create|add|save|write|record|take|make)\s+(?:a\s+)?note)\b(?:\s+(?:that|about|saying)\b|\s*[.!?:,;\-\u2013\u2014]|\s+(?=\S))|note\b(?:\s+that\b|\s*[.:])|remember\s+that\b)\s*[,;:\-.!?\u2013\u2014]?\s*/iu;
+const SECOND_CREATE_COMMAND = /\b(?:and(?:\s+then)?|then)\s+(?:(?:please\s+)?(?:remind\s+me|remember\s+to)\b|(?:(?:please\s+)?(?:create|add|set|save)\s+(?:a\s+)?reminder\b)|(?:(?:please\s+)?(?:create|add|save|write|record|take|make)\s+(?:a\s+)?note\b)|note\s*:)/iu;
+
+function normalizedRemainder(value) {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:\-\u2013\u2014]+/, '')
+    .replace(/^(?:(?:to|that|about|for)\b[\s,;:\-\u2013\u2014]*)+/iu, '')
+    .replace(/\s+([.,!?;:])/g, '$1')
+    .trim();
+}
+
+function defaultNoteParts(transcript) {
+  const body = typeof transcript === 'string' ? transcript.trim() : '';
+  const titleBody = body.replace(NOTE_TITLE_PREFIX, '').trim() || body;
+  const titleSource = titleBody.split(/(?:\r?\n|(?<=[.!?])\s+)/u)[0].trim();
+  const title = titleSource.length <= 120 ? titleSource : `${titleSource.slice(0, 119).trimEnd()}\u2026`;
+  return { body, title };
+}
+
+function splitExplicitReminderRemainder(value) {
+  const source = value.trim();
+  const boundary = /\s+(?:to|that|about)\s+/giu;
+  for (const match of source.matchAll(boundary)) {
+    const timePhrase = source.slice(0, match.index).trim();
+    if (!/^(?:(?:at|on|in|by|before|after|for)\b|today\b|tomorrow\b|tonight\b|next\b|this\b|every\b)/iu.test(timePhrase)) {
+      continue;
+    }
+    const title = normalizedRemainder(source.slice(match.index + match[0].length));
+    if (title) return { title, dueText: timePhrase };
+  }
+  return { title: normalizedRemainder(source), dueText: '' };
+}
+
+function explicitReminderParts(transcript, dateTimeHuman = null) {
+  const source = typeof transcript === 'string' ? transcript : '';
+  const prefix = REMINDER_COMMAND_PREFIX.exec(source);
+  const searchFrom = prefix ? prefix[0].length : 0;
+  const dateTextValid = dateTimeHuman == null || dateTimeHuman === ''
+    ? false
+    : typeof dateTimeHuman === 'string' && dateTimeHuman.trim().length > 0 && dateTimeHuman.length <= 120;
+  const escapedDateText = dateTextValid
+    ? dateTimeHuman.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    : '';
+  const dateMatch = escapedDateText
+    ? new RegExp(escapedDateText, 'iu').exec(source.slice(searchFrom))
+    : null;
+  const dateIndex = dateMatch ? searchFrom + dateMatch.index : -1;
+  let groundedDateText = dateIndex >= 0
+    ? source.slice(dateIndex, dateIndex + dateMatch[0].length)
+    : '';
+  const rawRemainder = prefix
+    ? dateIndex >= searchFrom
+      ? `${source.slice(prefix[0].length, dateIndex)} ${source.slice(dateIndex + dateMatch[0].length)}`
+      : source.slice(prefix[0].length)
+    : '';
+  let title;
+  if (prefix && !dateTimeHuman) {
+    const split = splitExplicitReminderRemainder(rawRemainder);
+    title = split.title;
+    groundedDateText = split.dueText;
+  } else {
+    title = normalizedRemainder(rawRemainder);
+  }
+  return {
+    prefix,
+    title,
+    groundedDateText,
+    dateTimeValid: !dateTimeHuman || dateIndex >= searchFrom,
+    hasSecondCommand: SECOND_CREATE_COMMAND.test(title)
+  };
+}
+
 function explicitReminderVerification(decision, transcript) {
   const call = decision.calls.length === 1 ? decision.calls[0] : null;
-  const source = typeof transcript === 'string' ? transcript : '';
-  const prefix = /^\s*remind me\b/i.exec(source);
   const validation = decision.raw?.validation;
   const ungrounded = validation?.ungrounded;
   const onlyExpectedValidation = Boolean(validation)
@@ -184,38 +256,15 @@ function explicitReminderVerification(decision, transcript) {
     && ungrounded[0] === 'create_reminder.message'
     && negationAcceptable;
   const dateTimeHuman = call?.arguments?.date_time_human;
-  const dateTextValid = typeof dateTimeHuman === 'string'
-    && dateTimeHuman.trim().length > 0
-    && dateTimeHuman.length <= 120;
-  const searchFrom = prefix ? prefix[0].length : 0;
-  const escapedDateText = dateTextValid
-    ? dateTimeHuman.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    : '';
-  const dateMatch = escapedDateText
-    ? new RegExp(escapedDateText, 'iu').exec(source.slice(searchFrom))
-    : null;
-  const dateIndex = dateMatch ? searchFrom + dateMatch.index : -1;
-  const groundedDateText = dateIndex >= 0
-    ? source.slice(dateIndex, dateIndex + dateMatch[0].length)
-    : '';
-  const rawRemainder = prefix && dateIndex >= searchFrom
-    ? `${source.slice(prefix[0].length, dateIndex)} ${source.slice(dateIndex + dateMatch[0].length)}`
-    : '';
-  const title = rawRemainder
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s,;:\-\u2013\u2014]+/, '')
-    .replace(/^(?:to|that|about)\b[\s,;:\-\u2013\u2014]*/i, '')
-    .replace(/\s+([.,!?;:])/g, '$1')
-    .trim();
-  const hasSecondExplicitCommand = /\b(?:and|then)\s+(?:remind me\b|(?:(?:take|make)\s+(?:a\s+)?note\b)|note\s*:)/iu.test(title);
+  const parts = explicitReminderParts(transcript, dateTimeHuman);
   const checks = {
     singleCreateReminder: call?.name === 'create_reminder',
-    explicitCommandPrefix: Boolean(prefix),
+    explicitCommandPrefix: Boolean(parts.prefix),
     onlyExpectedValidation,
     onlyMessageUngrounded,
-    dateTimeExactSubstring: dateIndex >= searchFrom,
-    noSecondExplicitCommand: !hasSecondExplicitCommand,
-    derivedTitleAvailable: title.length <= 200 && /[\p{L}\p{N}]/u.test(title)
+    dateTimeExactSubstringOrOmitted: parts.dateTimeValid,
+    noSecondExplicitCommand: !parts.hasSecondCommand,
+    derivedTitleAvailable: parts.title.length <= 200 && /[\p{L}\p{N}]/u.test(parts.title)
   };
   const accepted = Object.values(checks).every(Boolean);
   return {
@@ -224,62 +273,123 @@ function explicitReminderVerification(decision, transcript) {
     checks,
     provenance: accepted ? {
       title_source: 'original_transcript_remainder',
-      due_text_source: 'exact_original_transcript_substring'
+      ...(parts.groundedDateText ? { due_text_source: 'exact_original_transcript_substring' } : {})
     } : {},
     action: accepted ? {
       name: 'create_reminder',
-      arguments: { title, due_text: groundedDateText }
+      arguments: { title: parts.title, ...(parts.groundedDateText ? { due_text: parts.groundedDateText } : {}) }
     } : null
   };
 }
 
-function explicitNoteVerification(decision, transcript) {
+function exactOriginalSubstring(source, value, maxLength) {
+  if (typeof value !== 'string' || !value.trim() || value.length > maxLength) return '';
+  const escaped = value.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(escaped, 'iu').exec(source);
+  return match ? source.slice(match.index, match.index + match[0].length) : '';
+}
+
+function groundedReminderVerification(decision, transcript) {
   const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  const args = call?.arguments;
   const source = typeof transcript === 'string' ? transcript : '';
-  const prefix = /^\s*(?:(?:take|make)\s+(?:a\s+)?note(?:(?:\s+(?:that|about)\b)|\s*:)|note(?:\s+that\b|\s*:)|remember\s+that\b)\s*[,;\-\u2013\u2014]?\s*/iu.exec(source);
   const validation = decision.raw?.validation;
-  const ungrounded = validation?.ungrounded;
-  const allowedUngrounded = new Set(['create_note.text', 'create_note.title']);
-  const onlyExpectedValidation = Boolean(validation)
-    && typeof validation === 'object'
+  const onlyExpectedValidation = validation == null || (
+    typeof validation === 'object'
     && !Array.isArray(validation)
-    && Object.keys(validation).every((key) => key === 'ungrounded' || key === 'negation');
+    && Object.keys(validation).every((key) => key === 'ungrounded' || key === 'negation')
+  );
   const negationAcceptable = onlyExpectedValidation
-    && (!Object.hasOwn(validation, 'negation') || validation.negation === false);
-  const onlyNoteFieldsUngrounded = Array.isArray(ungrounded)
-    && ungrounded.length > 0
-    && ungrounded.every((field) => allowedUngrounded.has(field))
-    && negationAcceptable;
-  const body = prefix ? source.slice(prefix[0].length).trim() : '';
-  const hasSecondReminderCommand = /\b(?:and|then)\s+remind me\b/iu.test(body);
-  const titleSource = body.split(/(?:\r?\n|(?<=[.!?])\s+)/u)[0].trim();
-  const title = titleSource.length <= 120 ? titleSource : `${titleSource.slice(0, 119).trimEnd()}\u2026`;
+    && (validation == null || !Object.hasOwn(validation, 'negation') || validation.negation === false);
+  const message = exactOriginalSubstring(source, args?.message, 200);
+  const dateTimeHuman = args?.date_time_human;
+  const dateTimeOmitted = dateTimeHuman == null || dateTimeHuman === '';
+  const groundedDateText = dateTimeOmitted ? '' : exactOriginalSubstring(source, dateTimeHuman, 120);
   const checks = {
-    singleCreateNote: call?.name === 'create_note',
-    explicitCommandPrefix: Boolean(prefix),
+    singleCreateReminder: call?.name === 'create_reminder',
+    validArguments: Boolean(args) && typeof args === 'object' && !Array.isArray(args),
+    messageExactTranscriptSubstring: Boolean(message),
+    dateTimeExactSubstringOrOmitted: dateTimeOmitted || Boolean(groundedDateText),
     onlyExpectedValidation,
-    onlyNoteFieldsUngrounded,
-    noSecondReminderCommand: !hasSecondReminderCommand,
-    derivedBodyAvailable: body.length <= 8000 && /[\p{L}\p{N}]/u.test(body),
-    derivedTitleAvailable: title.length <= 120 && /[\p{L}\p{N}]/u.test(title)
+    negationAcceptable,
+    noSecondCreateCommand: !SECOND_CREATE_COMMAND.test(source)
   };
   const accepted = Object.values(checks).every(Boolean);
   return {
-    policy: 'explicit_note_v1',
+    policy: 'grounded_reminder_v1',
     accepted,
     checks,
     provenance: accepted ? {
-      body_source: 'original_transcript_remainder',
-      title_source: 'original_transcript_remainder'
+      title_source: 'exact_original_transcript_substring',
+      ...(groundedDateText ? { due_text_source: 'exact_original_transcript_substring' } : {})
     } : {},
-    action: accepted ? { name: 'create_note', arguments: { title, body } } : null
+    action: accepted ? {
+      name: 'create_reminder',
+      arguments: { title: message, ...(groundedDateText ? { due_text: groundedDateText } : {}) }
+    } : null
+  };
+}
+
+function defaultNoteVerification(decision, transcript) {
+  const note = defaultNoteParts(transcript);
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  const checks = {
+    noActionOrSingleCreateNote: decision.calls.length === 0 || call?.name === 'create_note',
+    originalTranscriptAvailable: note.body.length <= 8000 && /[\p{L}\p{N}]/u.test(note.body),
+    derivedTitleAvailable: note.title.length <= 120 && /[\p{L}\p{N}]/u.test(note.title)
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  return {
+    policy: 'default_note_capture_v1',
+    accepted,
+    checks,
+    provenance: accepted ? {
+      action_source: call?.name === 'create_note' ? 'needle_note_intent' : 'default_note_fallback',
+      body_source: 'complete_original_transcript',
+      title_source: 'derived_from_original_transcript'
+    } : {},
+    action: accepted ? { name: 'create_note', arguments: { title: note.title, body: note.body } } : null
+  };
+}
+
+function defaultCaptureVerification(decision, transcript) {
+  const reminder = explicitReminderParts(transcript);
+  const reminderValid = Boolean(reminder.prefix)
+    && !reminder.hasSecondCommand
+    && reminder.title.length <= 200
+    && /[\p{L}\p{N}]/u.test(reminder.title);
+  if (!reminderValid) return defaultNoteVerification(decision, transcript);
+  const checks = {
+    routerReturnedNoAction: decision.calls.length === 0,
+    explicitReminderDetected: true,
+    noSecondCreateCommand: !reminder.hasSecondCommand,
+    originalTranscriptValuesAvailable: true
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  return {
+    policy: 'default_capture_v1',
+    accepted,
+    checks,
+    provenance: accepted ? {
+      action_source: 'explicit_reminder_from_original_transcript',
+      value_source: 'original_transcript_remainder',
+      ...(reminder.groundedDateText ? { due_text_source: 'exact_original_transcript_substring' } : {})
+    } : {},
+    action: accepted ? {
+      name: 'create_reminder',
+      arguments: { title: reminder.title, ...(reminder.groundedDateText ? { due_text: reminder.groundedDateText } : {}) }
+    } : null
   };
 }
 
 function lowConfidenceVerification(decision, transcript) {
   const call = decision.calls.length === 1 ? decision.calls[0] : null;
-  if (call?.name === 'create_reminder') return explicitReminderVerification(decision, transcript);
-  if (call?.name === 'create_note') return explicitNoteVerification(decision, transcript);
+  if (decision.calls.length === 0) return defaultCaptureVerification(decision, transcript);
+  if (call?.name === 'create_reminder') {
+    const explicit = explicitReminderVerification(decision, transcript);
+    return explicit.accepted ? explicit : groundedReminderVerification(decision, transcript);
+  }
+  if (call?.name === 'create_note') return defaultNoteVerification(decision, transcript);
   return {
     policy: 'explicit_create_action_v1',
     accepted: false,
@@ -427,7 +537,7 @@ function retryOrFail(db, claim, error, config) {
   );
 }
 
-function normalizeAction(decision) {
+function normalizeAction(decision, transcript) {
   if (decision.calls.length === 0) return { review: ['no_action', 'Needle did not identify a supported action'] };
   if (decision.calls.length !== 1) return { review: ['multiple_actions', 'Needle proposed more than one action'] };
   const call = decision.calls[0];
@@ -438,21 +548,29 @@ function normalizeAction(decision) {
     return { review: ['invalid_arguments', 'Needle returned invalid action arguments'] };
   }
   if (call.name === 'create_note') {
-    if (typeof call.arguments.text !== 'string') {
+    const note = defaultNoteParts(transcript);
+    if (note.body.length > 8000 || !/[\p{L}\p{N}]/u.test(note.body)) {
       return { review: ['invalid_arguments', 'Needle returned invalid note arguments'] };
     }
     return {
       name: call.name,
-      arguments: { body: call.arguments.text, ...(call.arguments.title ? { title: call.arguments.title } : {}) }
+      arguments: { title: note.title, body: note.body }
     };
   }
   if (call.name === 'create_reminder') {
-    if (typeof call.arguments.message !== 'string' || typeof call.arguments.date_time_human !== 'string') {
+    const dateTimeHuman = call.arguments.date_time_human;
+    if (
+      typeof call.arguments.message !== 'string'
+      || (dateTimeHuman != null && typeof dateTimeHuman !== 'string')
+    ) {
       return { review: ['invalid_arguments', 'Needle returned invalid reminder arguments'] };
     }
     return {
       name: call.name,
-      arguments: { title: call.arguments.message, due_text: call.arguments.date_time_human }
+      arguments: {
+        title: call.arguments.message,
+        ...(dateTimeHuman?.trim() ? { due_text: dateTimeHuman } : {})
+      }
     };
   }
   if (typeof call.arguments.request !== 'string' || !call.arguments.request.trim()) {
@@ -465,7 +583,8 @@ async function executeAction(deps, claim, decision, action) {
   const { db } = deps;
   const now = nowIso();
   const actionId = crypto.randomUUID();
-  const device = db.prepare('SELECT * FROM device_credentials WHERE id = ? AND revoked_at IS NULL').get(claim.device_id);
+  const device = db.prepare(`SELECT * FROM device_credentials
+    WHERE id = ? AND revoked_at IS NULL AND deleted_at IS NULL`).get(claim.device_id);
   if (!device) {
     markReview(db, claim, 'device_unavailable', 'The recording device is no longer active', decision);
     return;
@@ -539,6 +658,20 @@ async function processClaim(deps, claim) {
     const decision = parseDecision(await routeTranscript(deps, claim));
     markRouterHealth(deps.db, 'healthy');
     const threshold = Number(claim.processing_config.confidence_threshold);
+    const captureVerification = decision.calls.length === 0
+      ? defaultCaptureVerification(decision, claim.transcript_text)
+      : decision.calls.length === 1 && decision.calls[0]?.name === 'create_note'
+        ? defaultNoteVerification(decision, claim.transcript_text)
+        : null;
+    if (captureVerification?.accepted) {
+      attachDecisionMetadata(decision, claim, threshold, captureVerification);
+      const reason = captureVerification.action.name === 'create_note'
+        ? 'default_note_capture'
+        : 'verified_explicit_reminder';
+      logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed', reason);
+      await executeAction(deps, claim, decision, captureVerification.action);
+      return;
+    }
     if (decision.confidence == null || decision.confidence < threshold) {
       const verification = decision.confidence == null
         ? {
@@ -555,16 +688,27 @@ async function processClaim(deps, claim) {
         markReview(deps.db, claim, 'low_confidence', 'Needle confidence was below the configured threshold', decision);
         return;
       }
-      const verifiedReason = verification.policy === 'explicit_note_v1'
-        ? 'verified_explicit_note'
-        : 'verified_explicit_reminder';
+      const verifiedReason = verification.policy === 'default_note_capture_v1'
+        ? 'default_note_capture'
+        : verification.policy === 'explicit_reminder_v1'
+          ? 'verified_explicit_reminder'
+          : 'verified_explicit_transcript';
       logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed', verifiedReason);
       await executeAction(deps, claim, decision, verification.action);
       return;
     }
     attachDecisionMetadata(decision, claim, threshold);
-    const action = normalizeAction(decision);
+    const action = normalizeAction(decision, claim.transcript_text);
     if (action.review) {
+      const verification = action.review[0] === 'no_action'
+        ? defaultCaptureVerification(decision, claim.transcript_text)
+        : null;
+      if (verification) attachDecisionMetadata(decision, claim, threshold, verification);
+      if (verification?.accepted) {
+        logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed', 'verified_explicit_transcript');
+        await executeAction(deps, claim, decision, verification.action);
+        return;
+      }
       logProcessingDecision(deps, claim, decision, threshold, 'needs_review', action.review[0]);
       markReview(deps.db, claim, action.review[0], action.review[1], decision);
       return;

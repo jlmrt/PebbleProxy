@@ -227,7 +227,7 @@ export function createAuthenticator({ db, cryptoService }) {
     const row = id ? db.prepare(`SELECT dc.*, cd.type AS owner_device_type
       FROM device_credentials dc
       LEFT JOIN client_devices cd ON cd.id = dc.owner_device_id
-      WHERE dc.id = ?`).get(id) : null;
+      WHERE dc.id = ? AND dc.deleted_at IS NULL`).get(id) : null;
     const valid = Boolean(row && cryptoService.verifyToken(token, row.secret_hash));
     if (!valid || row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) {
       throw new HttpError(401, 'invalid_api_key', 'Invalid or expired API key', {
@@ -278,6 +278,7 @@ export function listDevices(db) {
   return db.prepare(`SELECT dc.*, cd.type AS owner_device_type
     FROM device_credentials dc
     LEFT JOIN client_devices cd ON cd.id = dc.owner_device_id
+    WHERE dc.deleted_at IS NULL
     ORDER BY dc.created_at DESC`).all().map(publicDevice);
 }
 
@@ -286,7 +287,8 @@ export function createClientDevice(db, input = {}) {
 }
 
 export function createDeviceConnection(db, cryptoService, ownerDeviceId, input = {}) {
-  const parent = db.prepare('SELECT * FROM client_devices WHERE id = ?').get(String(ownerDeviceId || ''));
+  const parent = db.prepare('SELECT * FROM client_devices WHERE id = ? AND deleted_at IS NULL')
+    .get(String(ownerDeviceId || ''));
   if (!parent) throw new HttpError(404, 'device_group_not_found', 'Device not found');
   return insertDeviceConnection(db, cryptoService, parent, input);
 }
@@ -314,18 +316,28 @@ function retainedDeviceData(db, ownerDeviceId) {
   ), 0);
 }
 
+function retireCredential(db, id, now) {
+  db.prepare(`UPDATE device_credentials
+    SET revoked_at = COALESCE(revoked_at, ?), deleted_at = ?, session_epoch = session_epoch + 1,
+      secret_hash = ?, secret_prefix = 'deleted', updated_at = ?
+    WHERE id = ? AND deleted_at IS NULL`)
+    .run(now, now, crypto.randomBytes(32).toString('base64url'), now, id);
+  db.prepare('DELETE FROM ai_sessions WHERE device_id = ?').run(id);
+}
+
 export function deleteInactiveDeviceConnection(db, ownerDeviceId, connectionId) {
   const ownerId = String(ownerDeviceId || '');
   const id = String(connectionId || '');
   transaction(db, () => {
     const connection = db.prepare(`SELECT id, revoked_at, expires_at FROM device_credentials
-      WHERE id = ? AND owner_device_id = ?`).get(id, ownerId);
+      WHERE id = ? AND owner_device_id = ? AND deleted_at IS NULL`).get(id, ownerId);
     if (!connection) throw new HttpError(404, 'device_not_found', 'Connection not found');
     if (!inactiveCredential(connection)) {
       throw new HttpError(409, 'connection_active', 'Revoke this connection before permanently deleting it');
     }
     if (retainedConnectionData(db, [id]) > 0) {
-      throw new HttpError(409, 'connection_has_data', 'Delete this connection’s recordings, notes, and reminders before removing it');
+      retireCredential(db, id, nowIso());
+      return;
     }
     db.prepare('DELETE FROM device_credentials WHERE id = ? AND owner_device_id = ?').run(id, ownerId);
   });
@@ -334,15 +346,18 @@ export function deleteInactiveDeviceConnection(db, ownerDeviceId, connectionId) 
 export function deleteInactiveClientDevice(db, ownerDeviceId) {
   const id = String(ownerDeviceId || '');
   transaction(db, () => {
-    const parent = db.prepare('SELECT id FROM client_devices WHERE id = ?').get(id);
+    const parent = db.prepare('SELECT id FROM client_devices WHERE id = ? AND deleted_at IS NULL').get(id);
     if (!parent) throw new HttpError(404, 'device_group_not_found', 'Device not found');
     const connections = db.prepare(`SELECT id, revoked_at, expires_at FROM device_credentials
-      WHERE owner_device_id = ?`).all(id);
+      WHERE owner_device_id = ? AND deleted_at IS NULL`).all(id);
     if (connections.some((connection) => !inactiveCredential(connection))) {
       throw new HttpError(409, 'device_group_has_active_connections', 'Revoke every active connection before permanently deleting this device');
     }
     if (retainedDeviceData(db, id) > 0) {
-      throw new HttpError(409, 'device_group_has_data', 'Delete this device’s recordings, notes, and reminders before removing it');
+      const now = nowIso();
+      for (const connection of connections) retireCredential(db, connection.id, now);
+      db.prepare('UPDATE client_devices SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
+      return;
     }
     db.prepare('DELETE FROM device_credentials WHERE owner_device_id = ?').run(id);
     db.prepare('DELETE FROM client_devices WHERE id = ?').run(id);
@@ -357,7 +372,7 @@ export function listClientDevices(db) {
     if (!grouped.has(ownerId)) grouped.set(ownerId, []);
     grouped.get(ownerId).push(connection);
   }
-  return db.prepare('SELECT * FROM client_devices ORDER BY created_at DESC, id DESC').all()
+  return db.prepare('SELECT * FROM client_devices WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC').all()
     .map((row) => clientDeviceView(row, grouped.get(row.id) || []));
 }
 
@@ -365,7 +380,8 @@ export function revokeDevice(db, id) {
   const now = nowIso();
   const result = transaction(db, () => {
     const updated = db.prepare(`UPDATE device_credentials
-      SET revoked_at = COALESCE(revoked_at, ?), session_epoch = session_epoch + 1, updated_at = ? WHERE id = ?`)
+      SET revoked_at = COALESCE(revoked_at, ?), session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL`)
       .run(now, now, id);
     db.prepare('DELETE FROM ai_sessions WHERE device_id = ?').run(id);
     return updated;
@@ -375,7 +391,8 @@ export function revokeDevice(db, id) {
 
 export function resetDeviceSessions(db, id) {
   const changed = transaction(db, () => {
-    const updated = db.prepare('UPDATE device_credentials SET session_epoch = session_epoch + 1, updated_at = ? WHERE id = ? AND revoked_at IS NULL')
+    const updated = db.prepare(`UPDATE device_credentials SET session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ? AND revoked_at IS NULL AND deleted_at IS NULL`)
       .run(nowIso(), id);
     db.prepare('DELETE FROM ai_sessions WHERE device_id = ?').run(id);
     return updated.changes;

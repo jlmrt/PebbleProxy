@@ -2,6 +2,7 @@
   "use strict";
 
   const API_ROOT = "/admin/api";
+  const PROCESSING_INFO_DISMISSED_KEY = "pebble-proxy.processing-info-dismissed.v1";
   const ROUTES = {
     setup: {
       title: "Guided setup",
@@ -35,7 +36,7 @@
     },
     processing: {
       title: "Transcript actions",
-      subtitle: "Local Needle routing for notes, reminders, and private agents.",
+      subtitle: "Notes and reminders from Index transcripts.",
       load: loadProcessing,
     },
     organizer: {
@@ -81,6 +82,11 @@
     notes: [],
     reminders: [],
     processingJobs: [],
+    processingSettings: {
+      enabled: false,
+      confidenceThreshold: 0.2,
+      agentAlias: null,
+    },
     selectedRecording: null,
     pollTimer: null,
     publicBaseUrl: "",
@@ -480,6 +486,27 @@
     else dialog.removeAttribute("open");
   }
 
+  function processingInfoDismissed() {
+    try {
+      return window.localStorage.getItem(PROCESSING_INFO_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function restoreProcessingInfoPreference() {
+    const notice = $("#processing-info");
+    if (notice) notice.hidden = processingInfoDismissed();
+  }
+
+  function dismissProcessingInfo() {
+    const notice = $("#processing-info");
+    if (notice) notice.hidden = true;
+    try {
+      window.localStorage.setItem(PROCESSING_INFO_DISMISSED_KEY, "1");
+    } catch {}
+  }
+
   function goTo(route) {
     const normalized = ROUTES[route] ? route : "overview";
     if (window.location.hash !== `#${normalized}`) {
@@ -856,7 +883,7 @@
   async function deleteInactiveDevice(id, name, connectionCount, button) {
     if (!id) return toast("This device has no identifier.", "error");
     const detail = connectionCount
-      ? ` This also permanently deletes its ${connectionCount} inactive ${connectionCount === 1 ? "connection" : "connections"}. Retained recordings, notes, or reminders must be deleted first.`
+      ? ` This also permanently deletes its ${connectionCount} inactive ${connectionCount === 1 ? "connection" : "connections"}. Recordings, notes, and reminders are kept.`
       : " This empty device will be permanently removed.";
     if (!window.confirm(`Delete ${plainText(name, "this device")}?${detail}`)) return;
     setBusy(button, true, "Deleting…");
@@ -872,7 +899,7 @@
 
   async function deleteInactiveConnection(deviceId, connectionId, name, button) {
     if (!deviceId || !connectionId) return toast("This connection has no identifier.", "error");
-    if (!window.confirm(`Permanently delete ${plainText(name, "this connection")}? Retained recordings, notes, or reminders must be deleted first.`)) return;
+    if (!window.confirm(`Permanently delete ${plainText(name, "this connection")}? Its recordings, notes, and reminders are kept.`)) return;
     setBusy(button, true, "Deleting…");
     try {
       await api(`/device-groups/${safeId(deviceId)}/connections/${safeId(connectionId)}`, { method: "DELETE" });
@@ -1845,34 +1872,35 @@
   function renderProcessingHealth(settings, message) {
     const status = normalizeStatus(first(settings, ["healthStatus", "health_status", "status"], "unknown"));
     const dot = $("#processing-health-dot");
-    const orb = $("#processing-health-orb");
+    const summary = $("#processing-health-summary");
     dot.className = "status-dot";
-    orb.className = "health-orb";
     if (status === "healthy") {
       dot.classList.add("status-healthy");
-      orb.classList.add("healthy");
-      $("#processing-health-label").textContent = "Ready";
-      $("#processing-health-title").textContent = "Needle is ready";
+      $("#processing-health-label").textContent = "Healthy";
     } else if (status === "error") {
       dot.classList.add("status-error");
-      orb.classList.add("error");
       $("#processing-health-label").textContent = "Unavailable";
-      $("#processing-health-title").textContent = "Needle needs attention";
     } else {
       dot.classList.add("status-unknown");
-      $("#processing-health-label").textContent = "Not checked";
-      $("#processing-health-title").textContent = "Waiting for a health check";
+      $("#processing-health-label").textContent = "Checking";
     }
-    $("#processing-health-message").textContent = plainText(
+    summary.title = plainText(
       message || first(settings, ["lastError", "last_error"]),
-      status === "healthy" ? "The local intent router is accepting transcripts." : "Test the bundled Needle service before enabling automatic actions."
+      status === "healthy" ? "Needle is healthy" : status === "error" ? "Needle is unavailable" : "Needle has not been checked yet"
     );
   }
 
   function fillProcessingForm(settings) {
-    $("#processing-enabled").checked = Boolean(first(settings, ["enabled"], false));
-    $("#processing-confidence").value = String(first(settings, ["confidenceThreshold", "confidence_threshold"], 0.2));
+    const enabled = Boolean(first(settings, ["enabled"], false));
+    const confidenceThreshold = Number(first(settings, ["confidenceThreshold", "confidence_threshold"], 0.2));
     const alias = plainText(first(settings, ["agentAlias", "agent_alias"]), "");
+    state.processingSettings = {
+      enabled,
+      confidenceThreshold,
+      agentAlias: alias || null,
+    };
+    $("#processing-enabled").checked = enabled;
+    $("#processing-confidence").value = String(confidenceThreshold);
     const select = $("#processing-agent-alias");
     select.replaceChildren(
       node("option", { value: "", text: "Do not forward to an agent" }),
@@ -1882,6 +1910,16 @@
       })
     );
     select.value = Array.from(select.options).some((option) => option.value === alias) ? alias : "";
+  }
+
+  function currentProcessingPayload(overrides = {}) {
+    return {
+      enabled: Object.hasOwn(overrides, "enabled") ? overrides.enabled : state.processingSettings.enabled,
+      confidenceThreshold: Object.hasOwn(overrides, "confidenceThreshold")
+        ? overrides.confidenceThreshold
+        : state.processingSettings.confidenceThreshold,
+      agentAlias: Object.hasOwn(overrides, "agentAlias") ? overrides.agentAlias : state.processingSettings.agentAlias,
+    };
   }
 
   function processingActionLabel(job) {
@@ -1983,11 +2021,14 @@
 
   async function loadProcessing() {
     const container = $("#processing-jobs");
+    const enabledToggle = $("#processing-enabled");
+    enabledToggle.disabled = true;
     container.replaceChildren(loadingState());
     const [processingResult, aliasesResult] = await Promise.allSettled([api("/processing"), api("/model-aliases")]);
     if (aliasesResult.status === "fulfilled") state.aliases = listFrom(aliasesResult.value, ["aliases", "modelAliases"]);
     if (processingResult.status === "rejected") {
       container.replaceChildren(errorState(processingResult.reason, loadProcessing));
+      enabledToggle.disabled = false;
       return;
     }
     const settings = objectFrom(processingResult.value, ["processing"]);
@@ -1995,26 +2036,51 @@
     fillProcessingForm(settings);
     renderProcessingHealth(settings);
     renderProcessingJobs();
+    enabledToggle.disabled = false;
   }
 
   async function saveProcessing(form, submitter) {
     const data = new FormData(form);
     setBusy(submitter, true, "Saving…");
     try {
-      await api("/processing", {
+      const response = await api("/processing", {
         method: "PUT",
-        body: {
-          enabled: data.get("enabled") === "on",
+        body: currentProcessingPayload({
+          enabled: $("#processing-enabled").checked,
           confidenceThreshold: Number(data.get("confidenceThreshold")),
           agentAlias: plainText(data.get("agentAlias"), "") || null,
-        },
+        }),
       });
+      const settings = objectFrom(response, ["processing"]);
+      fillProcessingForm(settings);
+      renderProcessingHealth(settings);
+      closeDialog($("#processing-dialog"));
       toast("Transcript processing settings saved.", "success");
-      await loadProcessing();
     } catch (error) {
       toast(error.message, "error", 6000);
     } finally {
       setBusy(submitter, false);
+    }
+  }
+
+  async function setProcessingEnabled(toggle) {
+    const previous = state.processingSettings.enabled;
+    const enabled = toggle.checked;
+    toggle.disabled = true;
+    try {
+      const response = await api("/processing", {
+        method: "PUT",
+        body: currentProcessingPayload({ enabled }),
+      });
+      const settings = objectFrom(response, ["processing"]);
+      fillProcessingForm(settings);
+      renderProcessingHealth(settings);
+      toast(enabled ? "Transcript actions enabled." : "Transcript actions disabled.", "success");
+    } catch (error) {
+      toggle.checked = previous;
+      toast(error.message, "error", 6000);
+    } finally {
+      toggle.disabled = false;
     }
   }
 
@@ -2023,7 +2089,7 @@
     try {
       const result = await api("/processing/test", { method: "POST", body: {}, timeout: 15000 });
       renderProcessingHealth({ status: first(result, ["status"], "healthy") });
-      toast("Needle is ready.", "success");
+      toast("Needle is healthy.", "success");
     } catch (error) {
       renderProcessingHealth({ status: "error" }, error.message);
       toast(error.message, "error", 6000);
@@ -2085,7 +2151,7 @@
   function renderNotes() {
     const container = $("#notes-list");
     if (!state.notes.length) {
-      container.replaceChildren(emptyState("No notes yet", "Ask your Pebble assistant to remember something, or add a note here.", "N", true));
+      container.replaceChildren(emptyState("No notes yet", "Create one here or from an Index transcript action.", "N", true));
       return;
     }
     container.replaceChildren(...state.notes.map((noteItem) => {
@@ -2106,7 +2172,7 @@
   function renderReminders() {
     const container = $("#reminders-list");
     if (!state.reminders.length) {
-      container.replaceChildren(emptyState("No reminders", "Create one here or through an approved MCP voice command.", "R", true));
+      container.replaceChildren(emptyState("No reminders", "Create one here or from an Index transcript action.", "R", true));
       return;
     }
     container.replaceChildren(...state.reminders.map((reminder) => {
@@ -2245,6 +2311,11 @@
       populateBackendOptions();
       showDialog($("#alias-dialog"));
     });
+    $("#open-processing-settings").addEventListener("click", () => showDialog($("#processing-dialog")));
+    $("#dismiss-processing-info").addEventListener("click", dismissProcessingInfo);
+    $("#processing-enabled").addEventListener("change", (event) => {
+      setProcessingEnabled(event.currentTarget).catch((error) => toast(error.message, "error"));
+    });
     $("#open-note-dialog").addEventListener("click", () => showDialog($("#note-dialog")));
     $("#open-reminder-dialog").addEventListener("click", () => showDialog($("#reminder-dialog")));
 
@@ -2320,6 +2391,7 @@
 
   function init() {
     bindEvents();
+    restoreProcessingInfoPreference();
     setConnection("checking");
     applyBackendPreset("openclaw");
     routeChanged();

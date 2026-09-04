@@ -19,13 +19,13 @@ ROUTER_METADATA = {
     "model": "needle2-base",
     "package": "cactus-needle",
     "package_version": NEEDLE_PACKAGE_VERSION,
-    "router_version": "0.1.0-test.10",
-    "tool_schema_version": "1",
+    "router_version": "0.1.0-test.12",
+    "tool_schema_version": "3",
 }
 TOOLS = [
     {
         "name": "create_note",
-        "description": "Save a free-form note. Notes store information; they never fire alerts.",
+        "description": "Save a note, idea, thought, observation, or fact for later. This is the default action when the user does not clearly request a different supported action. Not for a task the user wants to do later; use create_reminder for that.",
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -33,8 +33,8 @@ TOOLS = [
                 "text": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 200,
-                    "description": "The note content copied word for word.",
+                    "maxLength": 8000,
+                    "description": "The user's complete input, copied word for word without summarizing or rewriting.",
                 },
             },
             "required": ["text"],
@@ -42,7 +42,7 @@ TOOLS = [
     },
     {
         "name": "create_reminder",
-        "description": "Store a local reminder entry for a stated time. A reminder needs both a message and a time phrase.",
+        "description": "Set a reminder, optionally for a future time. Use for reminder requests, 'remember to' tasks, or a future date or time paired with a task, even when the user does not say 'remind me'.",
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -50,17 +50,17 @@ TOOLS = [
                 "message": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 120,
-                    "description": "What to be reminded about, copied word for word.",
+                    "maxLength": 200,
+                    "description": "What to be reminded about, copied word for word without performing the task.",
                 },
                 "date_time_human": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 60,
-                    "description": "The user's date or time phrase copied word for word.",
+                    "maxLength": 120,
+                    "description": "The user's date or time phrase copied word for word. Omit this field when no time was spoken.",
                 },
             },
-            "required": ["message", "date_time_human"],
+            "required": ["message"],
         },
     },
     {
@@ -92,7 +92,15 @@ def system_facts(context):
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
     date_fact = instant.astimezone(timezone.utc).strftime("%Y-%m-%d %a %H:%M UTC")
-    return f"date: {date_fact}; locale: en; device: Pebble; assistant: Pebble Proxy"
+    return (
+        f"date: {date_fact}; locale: en; device: Pebble; assistant: Pebble Proxy. "
+        "Route the voice capture to exactly one supported tool. Create a note with the user's complete input unless "
+        "they clearly request a different supported action; ambiguous thoughts and observations default to create_note, "
+        "without requiring action words such as 'create a note'. Use create_reminder for a task paired with a future "
+        "date or time even without the word 'remind', and treat 'remember to do something' as a reminder while "
+        "'remember that' followed by a fact remains a note. A reminder without a time is valid. Never invent a time "
+        "or other detail. Copy user-provided values verbatim and always choose an action, falling back to create_note."
+    )
 
 
 class RouterHandler(BaseHTTPRequestHandler):
