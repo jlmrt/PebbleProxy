@@ -15,7 +15,7 @@
     },
     devices: {
       title: "Devices",
-      subtitle: "Scoped credentials for every Pebble client.",
+      subtitle: "Index webhooks, custom MCP, and scoped credentials grouped by device.",
       load: loadDevices,
     },
     backends: {
@@ -572,7 +572,6 @@
     $("#public-base-url").value = publicBaseUrl;
     setCopyField($("#pebble-webhook-url"), webhookUrl);
     $("#setup-public-base-url").value = publicBaseUrl;
-    setCopyField($("#setup-index-webhook-url"), webhookUrl);
     setCopyField($("#setup-openai-base-url"), openAiBaseUrl);
     $("#setup-mcp-url").textContent = mcpUrl || "Complete step 1";
     const originStatus = $("#setup-origin-status");
@@ -618,10 +617,10 @@
 
   async function loadSetup() {
     try {
-      const [overviewResponse, devicesResponse] = await Promise.all([api("/overview"), api("/devices")]);
+      const [overviewResponse, devicesResponse] = await Promise.all([api("/overview"), api("/device-groups")]);
       const overview = objectFrom(overviewResponse, ["overview"]);
       state.devices = listFrom(devicesResponse, ["devices"]);
-      state.activeDeviceCount = state.devices.filter((device) => !first(device, ["revokedAt", "revoked_at"])).length;
+      state.activeDeviceCount = activeConnectionCount();
       renderConnectivity(overview);
       renderSetupStatus();
     } catch (error) {
@@ -669,15 +668,16 @@
     }
 
     const counts = objectFrom(first(overview, ["counts", "totals"], {}));
-    const deviceCount = Number(first(counts, ["devices", "activeDevices", "active_devices"], first(overview, ["deviceCount", "devices"], 0))) || 0;
-    state.activeDeviceCount = deviceCount;
+    const deviceCount = Number(first(counts, ["devices"], first(overview, ["deviceCount", "devices"], 0))) || 0;
+    const connectionCount = Number(first(counts, ["activeConnections", "active_connections", "activeDevices", "active_devices"], 0)) || 0;
+    state.activeDeviceCount = connectionCount;
     const recordingCount = Number(first(counts, ["recordings", "voiceRecordings", "voice_recordings"], first(overview, ["recordingCount"], 0))) || 0;
     const backendCount = Number(first(counts, ["backends", "aiBackends", "ai_backends"], first(overview, ["backendCount"], 0))) || 0;
     const stt = objectFrom(first(overview, ["stt", "speechToText", "speech_to_text"], {}));
     const sttStatus = normalizeStatus(first(stt, ["status", "health"], "unknown"));
 
     metrics.replaceChildren(
-      metricCard("Active devices", String(deviceCount), deviceCount === 1 ? "1 scoped credential" : `${deviceCount} scoped credentials`, "D"),
+      metricCard("Devices", String(deviceCount), connectionCount === 1 ? "1 active connection" : `${connectionCount} active connections`, "D"),
       metricCard("Recordings", String(recordingCount), "Retained in your private inbox", "R"),
       metricCard("AI backends", String(backendCount), backendCount ? "Available through aliases" : "Add a private provider", "AI"),
       metricCard("Local STT", sttStatus === "healthy" ? "Ready" : sttStatus === "error" ? "Error" : plainText(first(stt, ["status"], "Not set")), plainText(first(stt, ["model"], "No model configured")), "STT"),
@@ -713,52 +713,145 @@
     const container = $("#devices-list");
     container.replaceChildren(loadingState());
     try {
-      const response = await api("/devices");
+      const response = await api("/device-groups");
       state.devices = listFrom(response, ["devices"]);
+      state.activeDeviceCount = activeConnectionCount();
       renderDevices();
     } catch (error) {
       container.replaceChildren(errorState(error, loadDevices));
     }
   }
 
+  function deviceConnections(device) {
+    return listFrom(device, ["connections", "tokens", "credentials"]);
+  }
+
+  function activeConnectionCount(devices = state.devices) {
+    const now = Date.now();
+    return devices.reduce((count, device) => count + deviceConnections(device)
+      .filter((connection) => {
+        if (first(connection, ["revokedAt", "revoked_at"])) return false;
+        const expiresAt = first(connection, ["expiresAt", "expires_at"]);
+        return !expiresAt || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) > now;
+      }).length, 0);
+  }
+
+  function deviceTypeLabel(type) {
+    if (type === "index") return "Index 01";
+    if (type === "pebble") return "Pebble app / other client";
+    return "Existing connection";
+  }
+
+  function indexTriggerLabel(trigger) {
+    if (trigger === "single-click-hold") return "Ring Button Hold & Talk";
+    if (trigger === "double-click-hold") return "Double Click & Hold";
+    if (trigger === "all") return "Both recording gestures";
+    return "General connection";
+  }
+
+  function connectionWebhookUrl(connection) {
+    const direct = plainText(first(connection, ["webhookUrl", "webhook_url"]), "");
+    const path = plainText(first(connection, ["webhookPath", "webhook_path"]), "");
+    return direct || (state.publicBaseUrl && path ? `${state.publicBaseUrl}${path}` : "");
+  }
+
+  function connectionEndpointUrl(connection, names, fallback) {
+    return plainText(first(connection, names), "") || fallback || "";
+  }
+
+  function indexConnectionType(connection) {
+    const direct = plainText(first(connection, ["connectionType", "connection_type"]), "");
+    if (direct === "webhook" || direct === "mcp") return direct;
+    const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
+    return scopes.includes("mcp:invoke") && !scopes.includes("webhook:write") ? "mcp" : "webhook";
+  }
+
   function renderDevices() {
     const query = $("#device-search").value.trim().toLowerCase();
     const devices = state.devices.filter((device) => {
       if (!query) return true;
-      return [first(device, ["name", "label"]), first(device, ["tokenPrefix", "token_prefix"]), ...(Array.isArray(device.scopes) ? device.scopes : [])]
+      const connections = deviceConnections(device);
+      return [first(device, ["name", "label"]), first(device, ["type"]), ...connections.flatMap((connection) => [
+        first(connection, ["label", "name"]),
+        first(connection, ["tokenPrefix", "token_prefix"]),
+        first(connection, ["indexTrigger", "index_trigger"]),
+        first(connection, ["connectionType", "connection_type"]),
+        ...(Array.isArray(connection.scopes) ? connection.scopes : []),
+      ])]
         .some((value) => plainText(value, "").toLowerCase().includes(query));
     });
     $("#device-total").textContent = `${state.devices.length} ${state.devices.length === 1 ? "device" : "devices"}`;
     const container = $("#devices-list");
     if (!devices.length) {
-      container.replaceChildren(emptyState(query ? "No matching devices" : "No device tokens", query ? "Try a different search." : "Create a scoped token for your first Pebble client.", "D"));
+      container.replaceChildren(emptyState(query ? "No matching devices" : "No devices yet", query ? "Try a different search." : "Add your Index or Pebble app, then create its first connection.", "D"));
       return;
     }
 
     container.replaceChildren(...devices.map((device) => {
       const id = first(device, ["id", "deviceId", "device_id"]);
-      const scopes = Array.isArray(device.scopes) ? device.scopes : [];
-      const scopeContainer = node("div", { class: "scope-chips" }, ...scopes.map((scope) => node("span", { class: "scope-chip", text: plainText(scope) })));
-      const revoke = node("button", { class: "mini-button mini-button-danger", type: "button", text: "Revoke" });
-      revoke.addEventListener("click", () => revokeDevice(id, first(device, ["name", "label"], "this device"), revoke));
+      const name = plainText(first(device, ["name", "label"]), "Unnamed device");
+      const type = plainText(first(device, ["type"]), "other");
+      const connections = deviceConnections(device);
+      const addConnection = node("button", { class: "button button-secondary device-add-connection", type: "button", text: type === "index" ? "Add connection" : "Add token" });
+      addConnection.addEventListener("click", () => showConnectionDialog(device));
+      const deviceActions = [addConnection];
+      if (!connections.length) {
+        const removeDevice = node("button", { class: "button button-danger device-remove", type: "button", text: "Remove device" });
+        removeDevice.addEventListener("click", () => deleteEmptyDevice(id, name, removeDevice));
+        deviceActions.unshift(removeDevice);
+      }
+      const connectionRows = connections.length ? connections.map((connection) => {
+        const connectionId = first(connection, ["id", "connectionId", "connection_id"]);
+        const label = plainText(first(connection, ["label", "name"]), "Connection");
+        const revoked = Boolean(first(connection, ["revokedAt", "revoked_at"]));
+        const expiresAt = first(connection, ["expiresAt", "expires_at"]);
+        const expired = Boolean(expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) <= Date.now());
+        const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
+        const trigger = plainText(first(connection, ["indexTrigger", "index_trigger"]), "");
+        const connectionType = type === "index" ? indexConnectionType(connection) : "client";
+        const isIndexMcp = type === "index" && connectionType === "mcp";
+        const webhookUrl = connectionWebhookUrl(connection);
+        const endpointUrl = isIndexMcp
+          ? connectionEndpointUrl(connection, ["mcpUrl", "mcp_url"], state.publicMcpUrl)
+          : webhookUrl;
+        const revoke = node("button", { class: "mini-button mini-button-danger", type: "button", text: revoked ? "Revoked" : "Revoke", disabled: revoked });
+        revoke.addEventListener("click", () => revokeConnection(connectionId, label, revoke));
+        const actions = [revoke];
+        if (endpointUrl) {
+          const copy = node("button", { class: "mini-button", type: "button", text: isIndexMcp ? "Copy MCP URL" : "Copy URL" });
+          copy.addEventListener("click", () => copyText(endpointUrl, copy));
+          actions.unshift(copy);
+        }
+        const connectionSummary = isIndexMcp
+          ? "Custom MCP server · Streamable HTTP"
+          : trigger
+            ? indexTriggerLabel(trigger)
+            : `Token ${plainText(first(connection, ["tokenPrefix", "token_prefix"]), "unknown")}…`;
+        return node(
+          "div",
+          { class: "device-connection-row" },
+          node("div", { class: "row-primary" }, node("strong", { text: label }), node("small", { text: connectionSummary })),
+          node("div", { class: "scope-chips" }, ...scopes.map((scope) => node("span", { class: "scope-chip", text: plainText(scope) }))),
+          node("div", { class: "row-secondary" }, node("strong", { text: expired ? formatDate(expiresAt) : relativeDate(first(connection, ["lastUsedAt", "last_used_at"])) }), node("small", { text: expired ? "Expired" : "Last used" })),
+          node("div", { class: "row-actions" }, statusBadge(revoked || expired ? "disabled" : "healthy", revoked ? "Revoked" : expired ? "Expired" : "Active"), ...actions),
+        );
+      }) : [emptyState("No connections yet", type === "index" ? "Add an Index recording webhook or custom MCP server." : "Add a scoped token for this app or client.", type === "index" ? "I" : "P", true)];
       return node(
         "article",
-        { class: "data-row device-row" },
-        node("div", { class: "row-primary" }, node("strong", { text: plainText(first(device, ["name", "label"]), "Unnamed device") }), node("small", { text: first(device, ["tokenPrefix", "token_prefix"]) ? `Token ${plainText(first(device, ["tokenPrefix", "token_prefix"]))}…` : `Created ${relativeDate(first(device, ["createdAt", "created_at"]))}` })),
-        scopeContainer,
-        node("div", { class: "row-secondary" }, node("strong", { text: relativeDate(first(device, ["lastUsedAt", "last_used_at"])) }), node("small", { text: "Last used" })),
-        node("div", { class: "row-actions" }, statusBadge(first(device, ["status"], first(device, ["revokedAt", "revoked_at"]) ? "disabled" : "healthy"), first(device, ["revokedAt", "revoked_at"]) ? "Revoked" : "Active"), revoke),
+        { class: "device-group" },
+        node("header", { class: "device-group-header" }, node("div", { class: `device-type-icon device-type-${type}`, text: type === "index" ? "I" : type === "pebble" ? "P" : "D", ariaHidden: "true" }), node("div", { class: "device-group-title" }, node("strong", { text: name }), node("small", { text: `${deviceTypeLabel(type)} · ${connections.length} ${connections.length === 1 ? "connection" : "connections"}` })), node("div", { class: "device-group-actions" }, ...deviceActions)),
+        node("div", { class: "device-connections" }, ...connectionRows),
       );
     }));
   }
 
-  async function revokeDevice(id, name, button) {
+  async function deleteEmptyDevice(id, name, button) {
     if (!id) return toast("This device has no identifier.", "error");
-    if (!window.confirm(`Revoke the token for ${plainText(name, "this device")}? Existing clients will immediately lose access.`)) return;
-    setBusy(button, true, "Revoking…");
+    if (!window.confirm(`Remove ${plainText(name, "this device")}? This empty device will be removed from the list.`)) return;
+    setBusy(button, true, "Removing…");
     try {
-      await api(`/devices/${safeId(id)}`, { method: "DELETE" });
-      toast("Device token revoked.", "success");
+      await api(`/device-groups/${safeId(id)}`, { method: "DELETE" });
+      toast("Empty device removed.", "success");
       await loadDevices();
     } catch (error) {
       toast(error.message, "error");
@@ -766,55 +859,218 @@
     }
   }
 
-  async function createDevice(form, submitter) {
-    const data = new FormData(form);
-    const scopes = data.getAll("scopes").map(String);
-    if (!scopes.length) {
-      toast("Select at least one capability.", "warning");
-      return;
-    }
-    const button = submitter;
-    setBusy(button, true, "Creating…");
+  async function revokeConnection(id, name, button) {
+    if (!id) return toast("This connection has no identifier.", "error");
+    if (!window.confirm(`Revoke ${plainText(name, "this connection")}? Its current token will immediately stop working.`)) return;
+    setBusy(button, true, "Revoking…");
     try {
-      const response = await api("/devices", {
+      await api(`/devices/${safeId(id)}`, { method: "DELETE" });
+      toast("Connection revoked.", "success");
+      await loadDevices();
+    } catch (error) {
+      toast(error.message, "error");
+      setBusy(button, false);
+    }
+  }
+
+  function updateDeviceTypeHelp() {
+    const form = $("#device-form");
+    const type = plainText(new FormData(form).get("deviceType"), "index");
+    const name = form.elements.name;
+    if (type === "index") {
+      $("#device-type-help").textContent = "Index supports recording webhooks and custom MCP servers. It does not use the OpenAI-compatible endpoint.";
+      name.placeholder = "My Pebble Index";
+    } else {
+      $("#device-type-help").textContent = "Pebble apps and other trusted clients can receive a token for AI chat, speech, MCP tools, a voice webhook, or any combination you choose.";
+      name.placeholder = "My Pebble app";
+    }
+  }
+
+  function updateConnectionTypeFields() {
+    const form = $("#connection-form");
+    const type = plainText(form.elements.deviceType.value, "other");
+    const connectionType = plainText(new FormData(form).get("connectionType"), "webhook");
+    const isIndex = type === "index";
+    const isWebhook = isIndex && connectionType === "webhook";
+    $("#index-webhook-fields").hidden = !isWebhook;
+    $("#index-mcp-fields").hidden = !isIndex || isWebhook;
+    form.elements.indexTrigger.disabled = !isWebhook;
+    form.elements.label.placeholder = isIndex
+      ? isWebhook ? "Both recording gestures" : "Pebble Proxy tools"
+      : "Primary connection";
+  }
+
+  function showConnectionDialog(device) {
+    const form = $("#connection-form");
+    const id = plainText(first(device, ["id", "deviceId", "device_id"]), "");
+    const type = plainText(first(device, ["type"]), "other");
+    const name = plainText(first(device, ["name", "label"]), "this device");
+    form.reset();
+    form.elements.deviceId.value = id;
+    form.elements.deviceType.value = type;
+    form.elements.rateLimit.value = "30";
+    $("#connection-dialog-title").textContent = type === "index" ? `Add an Index connection for ${name}` : `Add a token for ${name}`;
+    $("#connection-dialog-intro").textContent = type === "index"
+      ? "Choose a recording webhook or a custom MCP server. Each connection gets its own revocable token."
+      : "Choose exactly which capabilities this app or client may use.";
+    $("#index-connection-fields").hidden = type !== "index";
+    $("#pebble-connection-scopes").hidden = type === "index";
+    for (const checkbox of $$('input[name="scopes"]', form)) {
+      checkbox.disabled = type === "index";
+      checkbox.checked = true;
+    }
+    for (const radio of $$('.connection-type-picker input[name="connectionType"]', form)) radio.disabled = type !== "index";
+    updateConnectionTypeFields();
+    showDialog($("#connection-dialog"));
+  }
+
+  async function createDeviceGroup(form, submitter) {
+    const data = new FormData(form);
+    setBusy(submitter, true, "Adding…");
+    try {
+      const response = await api("/device-groups", {
         method: "POST",
         body: {
           name: plainText(data.get("name"), ""),
-          scopes,
-          rateLimit: Number(data.get("rateLimit")) || 30,
-          expiresIn: plainText(data.get("expiresIn"), "never"),
+          type: plainText(data.get("deviceType"), "index"),
         },
       });
-      const result = objectFrom(response, ["device", "credential"]);
-      const token = first(response, ["token", "accessToken", "access_token", "secret"], first(result, ["token", "accessToken", "access_token", "secret"], ""));
+      const device = objectFrom(response, ["device"]);
       closeDialog($("#device-dialog"));
       form.reset();
-      for (const checkbox of $$('input[name="scopes"]', form)) checkbox.checked = true;
-      form.elements.rateLimit.value = "30";
+      updateDeviceTypeHelp();
+      await loadDevices();
+      toast("Device added. Now create its first connection.", "success");
+      showConnectionDialog(device);
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      setBusy(submitter, false);
+    }
+  }
+
+  function showCreatedToken(token, connection, device) {
+    const type = plainText(first(device, ["type"]), "other");
+    const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
+    const connectionType = type === "index" ? indexConnectionType(connection) : "client";
+    const isIndexMcp = type === "index" && connectionType === "mcp";
+    const webhookUrl = connectionWebhookUrl(connection);
+    const openAiBaseUrl = connectionEndpointUrl(connection, ["openAiBaseUrl", "open_ai_base_url"], state.publicOpenAiBaseUrl);
+    const speechUrl = connectionEndpointUrl(connection, ["speechUrl", "speech_url"], state.publicBaseUrl ? `${state.publicBaseUrl}/v1/audio/speech` : "");
+    const mcpUrl = connectionEndpointUrl(connection, ["mcpUrl", "mcp_url"], state.publicMcpUrl);
+    const trigger = plainText(first(connection, ["indexTrigger", "index_trigger"]), "");
+    const label = plainText(first(connection, ["label", "name"]), "New connection");
+    $("#new-device-token").value = plainText(token, "");
+    $("#new-device-header-name").value = "X-Widget-Token";
+    $("#new-device-header-value").value = plainText(token, "");
+    $("#new-device-authorization-value").value = token ? `Bearer ${plainText(token)}` : "";
+    $("#token-context").textContent = `${plainText(first(device, ["name", "label"]), "Device")} · ${label}${trigger ? ` · ${indexTriggerLabel(trigger)}` : ""}`;
+    setCopyField($("#new-device-webhook-url"), webhookUrl);
+    $("#token-webhook").hidden = !scopes.includes("webhook:write");
+    const apiScopes = scopes.filter((scope) => scope !== "webhook:write");
+    $("#token-api-instruction").hidden = !apiScopes.length;
+    const apiEndpoints = [];
+    if (isIndexMcp) {
+      apiEndpoints.push(["MCP tools", mcpUrl || "Set the public HTTPS origin, then use /mcp"]);
+      $("#token-api-heading").textContent = "Pebble Index custom MCP server";
+      $("#token-api-copy").replaceChildren(
+        "In the Pebble app, add an HTTP MCP server and choose ",
+        node("strong", { text: "Streamable HTTP" }),
+        ". Paste the URL below, copy the exact Authorization value, and assign the server to a cloud MCP Sandbox group.",
+      );
+    } else {
+      if (scopes.includes("ai:chat")) apiEndpoints.push(["AI chat", openAiBaseUrl || "Set the public HTTPS origin, then use /v1"]);
+      if (scopes.includes("tts:speech")) apiEndpoints.push(["Speech", speechUrl || "Set the public HTTPS origin, then use /v1/audio/speech"]);
+      if (scopes.includes("mcp:invoke")) apiEndpoints.push(["MCP tools", mcpUrl || "Set the public HTTPS origin, then use /mcp"]);
+      $("#token-api-heading").textContent = "Pebble watch app or API client";
+      $("#token-api-copy").replaceChildren(
+        "Use ",
+        node("code", { text: "Authorization" }),
+        " as the header name and copy the exact value below. Only the selected capabilities are enabled:",
+      );
+    }
+    $("#token-api-endpoints").replaceChildren(...apiEndpoints.map(([capability, endpoint]) =>
+      node("li", {}, node("strong", { text: capability }), node("code", { text: endpoint }))
+    ));
+    $("#token-webhook-heading").textContent = type === "index" ? "Pebble Index / CoreApp" : "Voice webhook";
+    const instruction = $("#token-index-instruction");
+    if (!webhookUrl) {
+      instruction.replaceChildren("Save the token now, then set a public HTTPS origin in Guided setup. The device page will show the connection’s webhook URL afterward.");
+    } else if (type === "index") {
+      instruction.replaceChildren(
+        "Paste the URL above into ",
+        node("strong", { text: indexTriggerLabel(trigger) }),
+        " in the Index Webhook settings. In Custom headers, paste ",
+        node("code", { text: "X-Widget-Token" }),
+        " into the first field and the raw token into the second. Do not add ",
+        node("code", { text: "Bearer" }),
+        ".",
+      );
+    } else {
+      instruction.replaceChildren(
+        "Use the URL above for voice uploads. Send the raw token in the ",
+        node("code", { text: "X-Widget-Token" }),
+        " header, without ",
+        node("code", { text: "Bearer" }),
+        ".",
+      );
+    }
+    $("#token-saved").checked = false;
+    $("#close-token-dialog").disabled = true;
+    showDialog($("#token-dialog"));
+  }
+
+  function clearCreatedTokenDialog() {
+    $("#new-device-token").value = "";
+    $("#new-device-webhook-url").value = "";
+    $("#new-device-header-name").value = "";
+    $("#new-device-header-value").value = "";
+    $("#new-device-authorization-value").value = "";
+    $("#token-context").textContent = "";
+    $("#token-webhook").hidden = true;
+    $("#token-api-instruction").hidden = true;
+    $("#token-api-endpoints").replaceChildren();
+    $("#token-saved").checked = false;
+    $("#close-token-dialog").disabled = true;
+  }
+
+  async function createConnection(form, submitter) {
+    const data = new FormData(form);
+    const id = plainText(data.get("deviceId"), "");
+    const type = plainText(data.get("deviceType"), "other");
+    const device = state.devices.find((item) => String(first(item, ["id", "deviceId", "device_id"], "")) === id);
+    const scopes = data.getAll("scopes").map(String);
+    if (type !== "index" && !scopes.length) {
+      toast("Select at least one capability.", "warning");
+      return;
+    }
+    setBusy(submitter, true, "Creating…");
+    try {
+      const body = {
+        label: plainText(data.get("label"), ""),
+        rateLimit: Number(data.get("rateLimit")) || 30,
+        expiresIn: plainText(data.get("expiresIn"), "never"),
+      };
+      if (type === "index") {
+        body.connectionType = plainText(data.get("connectionType"), "webhook");
+        if (body.connectionType === "webhook") body.indexTrigger = plainText(data.get("indexTrigger"), "all");
+      } else body.scopes = scopes;
+      const response = await api(`/device-groups/${safeId(id)}/connections`, { method: "POST", body });
+      const connection = objectFrom(response, ["connection", "credential"]);
+      const token = plainText(first(response, ["token", "accessToken", "access_token", "secret"], first(connection, ["token", "accessToken", "access_token", "secret"], "")), "");
+      closeDialog($("#connection-dialog"));
       if (token) {
-        $("#new-device-token").value = plainText(token, "");
-        $("#new-device-header-value").value = plainText(token, "");
-        const tokenWebhook = $("#token-webhook");
-        if (state.publicWebhookUrl) {
-          $("#new-device-webhook-url").value = state.publicWebhookUrl;
-          tokenWebhook.hidden = false;
-        } else {
-          $("#new-device-webhook-url").value = "";
-          tokenWebhook.hidden = true;
-        }
-        $("#token-saved").checked = false;
-        $("#close-token-dialog").disabled = true;
-        showDialog($("#token-dialog"));
+        showCreatedToken(token, connection, device || { name: "Device", type });
         state.activeDeviceCount += 1;
         renderSetupStatus();
       } else {
-        toast("Device created, but the server did not return a one-time token.", "warning", 6500);
+        toast("Connection created, but the server did not return a one-time token.", "warning", 6500);
       }
       await loadDevices();
     } catch (error) {
       toast(error.message, "error");
     } finally {
-      setBusy(button, false);
+      setBusy(submitter, false);
     }
   }
 
@@ -1539,7 +1795,7 @@
     const remindersContainer = $("#reminders-list");
     notesContainer.replaceChildren(loadingState(true));
     remindersContainer.replaceChildren(loadingState(true));
-    const [notesResult, remindersResult, devicesResult] = await Promise.allSettled([api("/notes"), api("/reminders"), api("/devices")]);
+    const [notesResult, remindersResult, devicesResult] = await Promise.allSettled([api("/notes"), api("/reminders"), api("/device-groups")]);
     if (devicesResult.status === "fulfilled") {
       state.devices = listFrom(devicesResult.value, ["devices"]);
     } else {
@@ -1611,6 +1867,65 @@
     return plainText(type, "No action").replaceAll("_", " ");
   }
 
+  function processingDecisionDetails(job) {
+    const proposed = objectFrom(first(job, ["proposedAction", "proposed_action"], {}));
+    const error = objectFrom(first(job, ["error"], {}));
+    const action = objectFrom(first(job, ["action"], {}));
+    const validation = objectFrom(first(proposed, ["validation"], {}));
+    const proxyDecision = objectFrom(first(proposed, ["proxy_decision"], {}));
+    const verification = objectFrom(first(job, ["verification"], first(proxyDecision, ["verification"], {})));
+    const calls = Array.isArray(proposed.function_calls) ? proposed.function_calls : [];
+    const call = objectFrom(calls[0]);
+    const args = objectFrom(first(call, ["arguments"], {}));
+    const executedArgs = objectFrom(first(action, ["arguments"], {}));
+    const rawConfidence = first(job, ["confidence"]);
+    const threshold = first(job, ["confidenceThreshold", "confidence_threshold"], first(proxyDecision, ["confidence_threshold"]));
+    const router = objectFrom(first(proposed, ["router"], {}));
+    const metricText = [
+      first(proposed, ["prefill_tps"]) != null ? `prefill ${Number(proposed.prefill_tps).toFixed(1)} tok/s` : "",
+      first(proposed, ["decode_tps"]) != null ? `decode ${Number(proposed.decode_tps).toFixed(1)} tok/s` : "",
+      first(proposed, ["peak_ram_mb"]) != null ? `${Number(proposed.peak_ram_mb).toFixed(1)} MB peak` : "",
+    ].filter(Boolean).join(" · ");
+    const scoreText = rawConfidence == null
+      ? "Not returned"
+      : `${Number(rawConfidence).toFixed(4)}${threshold == null ? "" : ` (threshold ${Number(threshold).toFixed(2)})`}`;
+    const whyText = first(error, ["message"], first(proposed, ["error", "reason"], "No error reported"));
+    const diagnosticRows = [
+      ["Why", plainText(whyText, "No error reported")],
+      ["Error code", plainText(first(error, ["code"]), "None")],
+      ["Raw Needle score", scoreText],
+      ["Proposed action", plainText(first(call, ["name"]), "None")],
+      ["Raw Needle proposal", Object.keys(args).length ? JSON.stringify(args, null, 2) : "None"],
+      ["Executed values", Object.keys(executedArgs).length ? JSON.stringify(executedArgs, null, 2) : "No action executed"],
+      ["Needle reasoning", plainText(first(proposed, ["reasoning", "reason"]), "Not returned")],
+      ["Grounding check", Object.keys(validation).length ? JSON.stringify(validation, null, 2) : "Not returned"],
+      ["Safety decision", Object.keys(verification).length ? JSON.stringify(verification, null, 2) : "Standard confidence gate"],
+      ["Router", [plainText(first(router, ["model"]), "Needle 2 base"), plainText(first(router, ["packageVersion", "package_version"]), "")].filter(Boolean).join(" · ")],
+      ["Config revision", String(first(job, ["configRevision", "config_revision"], first(proxyDecision, ["config_revision"], "Unknown")))],
+      ["Recording time", plainText(first(job, ["recordedAt", "recorded_at", "receivedAt", "received_at"]), "Not returned")],
+      ["Performance", metricText || "Not returned"],
+      ["Attempts", String(first(job, ["attempts"], 0))],
+      ["Trigger", plainText(first(job, ["trigger"]), "Not supplied")],
+      ["Raw router response", Object.keys(proposed).length ? JSON.stringify(proposed, null, 2) : "Not retained"],
+    ];
+    const detail = node(
+      "details",
+      { class: "decision-details" },
+      node("summary", { text: "View decision details" }),
+      node(
+        "div",
+        { class: "decision-detail-body" },
+        node("div", { class: "decision-transcript" }, node("small", { text: "Transcript" }), node("p", { text: plainText(first(job, ["transcriptText", "transcript_text"]), "Transcript unavailable") })),
+        node("dl", { class: "decision-diagnostics" }, ...diagnosticRows.map(([label, value]) => node("div", { class: "decision-diagnostic" }, node("dt", { text: label }), node("dd", { text: value })))),
+      ),
+    );
+    detail.addEventListener("toggle", () => {
+      const summary = $("summary", detail);
+      if (summary) summary.textContent = detail.open ? "Hide decision details" : "View decision details";
+    });
+    return detail;
+  }
+
   function renderProcessingJobs() {
     const container = $("#processing-jobs");
     if (!state.processingJobs.length) {
@@ -1630,12 +1945,13 @@
       }
       return node(
         "article",
-        { class: "data-row alias-row" },
-        node("div", { class: "row-primary" }, node("strong", { text: processingActionLabel(job) }), node("small", { text: `${plainText(first(job, ["deviceName", "device_name"]), "Pebble")} · ${relativeDate(first(job, ["createdAt", "created_at"]))}` })),
+        { class: "data-row alias-row processing-row" },
+        node("div", { class: "row-primary" }, node("strong", { text: processingActionLabel(job) }), node("small", { text: `${organizerOwnerLabel(job) || "Pebble"} · ${relativeDate(first(job, ["createdAt", "created_at"]))}` })),
         statusBadge(status, status === "needs_review" ? "Needs review" : undefined),
         node("div", { class: "row-secondary" }, node("strong", { text: confidence == null ? "—" : `${Math.round(Number(confidence) * 100)}%` }), node("small", { text: "Confidence" })),
         node("div", { class: "row-secondary" }, node("strong", { text: plainText(first(job, ["transcriptSource", "transcript_source"]), "Waiting") }), node("small", { text: plainText(first(error, ["message"]), "Transcript source") })),
         node("div", { class: "row-actions" }, ...controls),
+        processingDecisionDetails(job),
       );
     }));
   }
@@ -1705,9 +2021,12 @@
 
   function activeDevices() {
     const now = Date.now();
-    return state.devices.filter((device) => {
-      if (first(device, ["revokedAt", "revoked_at"])) return false;
-      const expiresAt = first(device, ["expiresAt", "expires_at"]);
+    return state.devices.flatMap((device) => deviceConnections(device).map((connection) => ({
+      ...connection,
+      name: `${plainText(first(device, ["name", "label"]), "Device")} · ${plainText(first(connection, ["label", "name"]), "Connection")}`,
+    }))).filter((connection) => {
+      if (first(connection, ["revokedAt", "revoked_at"])) return false;
+      const expiresAt = first(connection, ["expiresAt", "expires_at"]);
       return !expiresAt || !Number.isFinite(new Date(expiresAt).getTime()) || new Date(expiresAt).getTime() > now;
     });
   }
@@ -1718,7 +2037,7 @@
       const previous = select.value;
       const placeholder = node("option", {
         value: "",
-        text: devices.length ? "Select an active device" : "No active devices — create one first",
+        text: devices.length ? "Select an active connection" : "No active connections — create one first",
         disabled: true,
         selected: true,
       });
@@ -1729,6 +2048,13 @@
       select.replaceChildren(placeholder, ...options);
       if (previous && options.some((option) => option.value === previous)) select.value = previous;
     }
+  }
+
+  function organizerOwnerLabel(item) {
+    const device = plainText(first(item, ["deviceName", "device_name"]), "");
+    const connection = plainText(first(item, ["connectionLabel", "connection_label"]), "");
+    if (!device) return "";
+    return connection && connection !== device ? `${device} · ${connection}` : device;
   }
 
   function renderNotes() {
@@ -1746,7 +2072,7 @@
         { class: "note-item" },
         node("h4", { text: plainText(first(noteItem, ["title", "name"]), "Untitled note") }),
         node("p", { text: plainText(first(noteItem, ["body", "content", "text"]), "") }),
-        node("div", { class: "note-meta" }, node("span", { text: relativeDate(first(noteItem, ["updatedAt", "updated_at", "createdAt", "created_at"])) }), first(noteItem, ["deviceName", "device_name"]) ? node("span", { text: `· ${plainText(first(noteItem, ["deviceName", "device_name"]))}` }) : null),
+        node("div", { class: "note-meta" }, node("span", { text: relativeDate(first(noteItem, ["updatedAt", "updated_at", "createdAt", "created_at"])) }), organizerOwnerLabel(noteItem) ? node("span", { text: `· ${organizerOwnerLabel(noteItem)}` }) : null),
         remove,
       );
     }));
@@ -1773,7 +2099,7 @@
         { class: `reminder-item${completed ? " completed" : ""}` },
         check,
         node("h4", { text: plainText(first(reminder, ["title", "text", "body"]), "Untitled reminder") }),
-        node("div", { class: `reminder-meta${overdue ? " due-overdue" : ""}` }, node("span", { text: completed ? "Completed" : overdue ? `Overdue · ${formatDate(dueAt)}` : dueAt ? formatDate(dueAt) : plainText(dueText, "No due time") }), first(reminder, ["deviceName", "device_name"]) ? node("span", { text: `· ${plainText(first(reminder, ["deviceName", "device_name"]))}` }) : null),
+        node("div", { class: `reminder-meta${overdue ? " due-overdue" : ""}` }, node("span", { text: completed ? "Completed" : overdue ? `Overdue · ${formatDate(dueAt)}` : dueAt ? formatDate(dueAt) : plainText(dueText, "No due time") }), organizerOwnerLabel(reminder) ? node("span", { text: `· ${organizerOwnerLabel(reminder)}` }) : null),
         remove,
       );
     }));
@@ -1844,10 +2170,6 @@
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const submitter = event.submitter;
-      if (submitter && submitter.value === "cancel") {
-        closeDialog(form.closest("dialog"));
-        return;
-      }
       if (!form.reportValidity()) return;
       handler(form, submitter).catch((error) => toast(error.message || "The request failed.", "error"));
     });
@@ -1871,13 +2193,24 @@
         copyText(copyValue(target), button, target);
       });
     }
+    for (const button of $$('[data-dialog-dismiss]')) {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        closeDialog(button.closest("dialog"));
+      });
+    }
 
     $("#device-search").addEventListener("input", renderDevices);
     $("#recording-search").addEventListener("input", renderRecordings);
     $("#recording-status").addEventListener("change", renderRecordings);
 
-    $("#open-device-dialog").addEventListener("click", () => showDialog($("#device-dialog")));
-    $("#setup-create-token").addEventListener("click", () => showDialog($("#device-dialog")));
+    const openDeviceDialog = () => {
+      $("#device-form").reset();
+      updateDeviceTypeHelp();
+      showDialog($("#device-dialog"));
+    };
+    $("#open-device-dialog").addEventListener("click", openDeviceDialog);
+    $("#setup-create-token").addEventListener("click", openDeviceDialog);
     $("#open-backend-dialog").addEventListener("click", () => {
       $("#backend-form").reset();
       applyBackendPreset("openclaw");
@@ -1893,19 +2226,20 @@
     $("#token-saved").addEventListener("change", (event) => {
       $("#close-token-dialog").disabled = !event.target.checked;
     });
+    const tokenDialog = $("#token-dialog");
     $("#close-token-dialog").addEventListener("click", () => {
-      $("#new-device-token").value = "";
-      $("#new-device-header-value").value = "";
-      $("#new-device-webhook-url").value = "";
-      $("#token-webhook").hidden = true;
+      clearCreatedTokenDialog();
       closeDialog($("#token-dialog"));
     });
-    $("#token-dialog").addEventListener("cancel", (event) => {
+    tokenDialog.addEventListener("cancel", (event) => {
       if (!$("#token-saved").checked) {
         event.preventDefault();
         toast("Confirm that you saved the token before closing.", "warning");
+      } else {
+        clearCreatedTokenDialog();
       }
     });
+    tokenDialog.addEventListener("close", clearCreatedTokenDialog);
 
     for (const dialog of $$("dialog.modal")) {
       dialog.addEventListener("click", (event) => {
@@ -1918,12 +2252,19 @@
         if (radio.checked) applyBackendPreset(radio.value);
       });
     }
+    for (const radio of $$('input[name="deviceType"]', $("#device-form"))) {
+      radio.addEventListener("change", updateDeviceTypeHelp);
+    }
+    for (const radio of $$('.connection-type-picker input[name="connectionType"]', $("#connection-form"))) {
+      radio.addEventListener("change", updateConnectionTypeFields);
+    }
     $("#backend-auth-type").addEventListener("change", updateBackendAuthFields);
     $("#test-stt").addEventListener("click", (event) => testStt(event.currentTarget));
     $("#test-tts").addEventListener("click", (event) => testTts(event.currentTarget));
     $("#test-processing").addEventListener("click", (event) => testProcessing(event.currentTarget));
 
-    bindFormDialog("#device-form", createDevice);
+    bindFormDialog("#device-form", createDeviceGroup);
+    bindFormDialog("#connection-form", createConnection);
     bindFormDialog("#connectivity-form", saveConnectivity);
     bindFormDialog("#setup-connectivity-form", saveConnectivity);
     bindFormDialog("#backend-form", createBackend);

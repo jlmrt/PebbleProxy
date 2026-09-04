@@ -52,7 +52,7 @@ assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.8["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.9["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -69,6 +69,17 @@ assert.match(html, /id="tts-form"/);
 assert.match(html, /id="new-device-token"[^>]*readonly/);
 assert.match(html, /src="\/clipboard\.js/);
 assert.match(browserScript, /PebbleClipboard\.copyText/);
+assert.match(html, /name="deviceType" value="index"/);
+assert.match(html, /name="connectionType" value="webhook"/);
+assert.match(html, /name="connectionType" value="mcp"/);
+assert.match(html, /Streamable HTTP/);
+assert.match(html, /id="new-device-authorization-value"/);
+assert.match(html, /id="connection-form"/);
+assert.match(browserScript, /api\("\/device-groups"\)/);
+assert.match(browserScript, /body\.connectionType = plainText\(data\.get\("connectionType"\), "webhook"\)/);
+assert.match(browserScript, /Pebble Index custom MCP server/);
+assert.match(browserScript, /\["proxy_decision"\]/);
+assert.match(browserScript, /Raw router response/);
 assert.match(html, /id="setup-cloudflare-target"[^>]*placeholder="Loading from Pebble Proxy"[^>]*>[\s\S]*?data-copy-target="setup-cloudflare-target" disabled/);
 assert.match(html, /id="cloudflare-service-url"[^>]*placeholder="Loading from Pebble Proxy"[^>]*>[\s\S]*?data-copy-target="cloudflare-service-url" disabled/);
 assert.match(browserScript, /\["serviceUrl", "service_url", "publicTarget", "public_target"\], ""/);
@@ -77,14 +88,21 @@ for (const [name, source] of [['web/index.html', html], ['web/app.js', browserSc
 }
 assert.match(browserStyles, /font-size:\s*max\(1rem, 16px\)/,
   'Editable controls need a 16px iOS Safari font-size floor');
-const cancelControls = html.match(/<button\b[^>]*\bvalue="cancel"[^>]*>/g) || [];
-assert.ok(cancelControls.length >= 2, 'Dialog cancel controls are required');
-for (const control of cancelControls) {
-  assert.match(control, /\bformnovalidate\b/, 'Dialog cancel controls must bypass required-field validation');
+for (const id of ['device-form', 'connection-form', 'backend-form', 'alias-form', 'note-form', 'reminder-form']) {
+  const form = html.match(new RegExp(`<form[^>]+id="${id}"[\\s\\S]*?<\\/form>`))?.[0] || '';
+  const controls = form.match(/<button\b[^>]*\bdata-dialog-dismiss\b[^>]*>/g) || [];
+  assert.equal(controls.length, 2, `${id} must have two dialog dismiss controls`);
+  for (const control of controls) {
+    assert.match(control, /\btype="button"/, `${id} dismiss controls must not submit the form`);
+  }
 }
+assert.doesNotMatch(html, /<button\b[^>]*\bvalue="cancel"[^>]*>/,
+  'Dialog dismissal must not depend on submit validation');
 const fixedFontSizes = [...browserStyles.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)]
   .map((match) => Number(match[1]));
-assert.ok(Math.min(...fixedFontSizes) >= 11, 'Fixed text must remain at least 11px');
+assert.ok(Math.min(...fixedFontSizes) >= 12, 'Fixed text must remain at least 12px');
+assert.match(browserStyles, /\.panel small,[\s\S]*?font-size:\s*14px/,
+  'Secondary interface copy must remain readable inside the Umbrel app frame');
 
 function exportedApiAddress(exportsAppId) {
   const result = spawnSync('bash', ['-c', 'set -u; source "$1"; printf "%s\\n%s\\n" "$APP_PEBBLE_PROXY_API_HOST" "$APP_PEBBLE_PROXY_API_URL"', 'bash', path.join(root, 'exports.sh')], {

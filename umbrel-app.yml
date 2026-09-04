@@ -2,7 +2,7 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.8"
+version: "0.1.0-test.9"
 tagline: A private voice and AI gateway for Pebble apps
 icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
@@ -23,5 +23,8 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Fixes Cancel and close controls being blocked by unfinished required fields in add dialogs,
-  and increases text sizes throughout the admin interface for better readability.
+  Adds typed Index and Pebble app devices with recording-webhook and custom MCP connections,
+  including shared or per-gesture webhook routes and exact setup fields. Improves explicit note
+  and reminder routing with detailed local Needle diagnostics, fixes Cancel and close controls
+  across required-field dialogs, and increases admin interface readability. Reminder entries are
+  stored locally and do not send phone notifications.

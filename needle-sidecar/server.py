@@ -2,11 +2,26 @@ import json
 import os
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from importlib.metadata import PackageNotFoundError, version
 
 import needle
 
 
 MAX_REQUEST_BYTES = 128 * 1024
+try:
+    NEEDLE_PACKAGE_VERSION = version("cactus-needle")
+except PackageNotFoundError:
+    NEEDLE_PACKAGE_VERSION = getattr(needle, "__version__", "unknown")
+
+ROUTER_METADATA = {
+    "engine": "needle2",
+    "engine_version": "2.0.4",
+    "model": "needle2-base",
+    "package": "cactus-needle",
+    "package_version": NEEDLE_PACKAGE_VERSION,
+    "router_version": "0.1.0-test.9",
+    "tool_schema_version": "1",
+}
 TOOLS = [
     {
         "name": "create_note",
@@ -27,7 +42,7 @@ TOOLS = [
     },
     {
         "name": "create_reminder",
-        "description": "Create a reminder that fires at a stated time. A reminder needs both a message and a time phrase.",
+        "description": "Store a local reminder entry for a stated time. A reminder needs both a message and a time phrase.",
         "parameters": {
             "type": "object",
             "additionalProperties": False,
@@ -97,7 +112,12 @@ class RouterHandler(BaseHTTPRequestHandler):
         if self.path != "/healthz":
             self.send_json(404, {"error": "not_found"})
             return
-        self.send_json(200, {"status": "ok", "ready": True, "engine": "needle2"})
+        self.send_json(200, {
+            "status": "ok",
+            "ready": True,
+            "engine": ROUTER_METADATA["engine"],
+            "router": ROUTER_METADATA,
+        })
 
     def do_POST(self):
         if self.path != "/v1/route":
@@ -122,6 +142,8 @@ class RouterHandler(BaseHTTPRequestHandler):
                 result = agent.complete(text.strip(), max_new_tokens=256)
             finally:
                 agent.close()
+            result = dict(result)
+            result["router"] = ROUTER_METADATA
             self.send_json(200, result)
         except (json.JSONDecodeError, ValueError):
             self.send_json(400, {"error": "invalid_request"})

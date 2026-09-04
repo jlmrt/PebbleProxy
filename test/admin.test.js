@@ -58,8 +58,194 @@ test('admin creates one-time scoped device credentials without returning stored 
   assert.equal(listed.body.devices.length, 1);
   assert.equal(listed.body.devices[0].name, 'Pebble One');
   assert.equal(JSON.stringify(listed.body).includes(created.body.token), false);
-  const stored = app.db.prepare('SELECT secret_hash FROM device_credentials').get();
+  const stored = app.db.prepare('SELECT secret_hash, id, owner_device_id FROM device_credentials').get();
   assert.equal(stored.secret_hash.includes(created.body.token), false);
+  assert.equal(stored.owner_device_id, app.db.prepare('SELECT id FROM client_devices').get().id);
+  assert.equal(app.db.prepare('SELECT type FROM client_devices').get().type, 'other');
+  const overview = await dispatch(app.router, 'GET', '/admin/api/overview');
+  assert.equal(overview.body.counts.devices, 1);
+  assert.equal(overview.body.counts.activeConnections, 1);
+  assert.equal(overview.body.counts.activeDevices, 1);
+  app.db.prepare('UPDATE device_credentials SET expires_at = ? WHERE id = ?')
+    .run('2020-01-01T00:00:00.000Z', stored.id);
+  const expiredOverview = await dispatch(app.router, 'GET', '/admin/api/overview');
+  assert.equal(expiredOverview.body.counts.devices, 1);
+  assert.equal(expiredOverview.body.counts.activeConnections, 0);
+});
+
+test('admin groups typed devices with one-time child connection tokens', async (t) => {
+  const app = fixture(t);
+  const createdIndex = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'My Index', type: 'index'
+  });
+  assert.equal(createdIndex.status, 201);
+  assert.equal(createdIndex.body.device.type, 'index');
+  assert.deepEqual(createdIndex.body.device.connections, []);
+
+  const hold = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
+    { indexTrigger: 'single-click-hold', rateLimit: 12, expiresIn: '30d' }
+  );
+  assert.equal(hold.status, 201);
+  assert.match(hold.body.token, /^pp_/);
+  assert.equal(hold.body.connection.label, 'Ring Button Hold & Talk');
+  assert.equal(hold.body.connection.connectionType, 'webhook');
+  assert.equal(hold.body.connection.indexTrigger, 'single-click-hold');
+  assert.deepEqual(hold.body.connection.scopes, ['webhook:write']);
+  assert.equal(hold.body.connection.requestsPerMinute, 12);
+  assert.equal(hold.body.connection.ownerDeviceId, createdIndex.body.device.id);
+  assert.equal(hold.body.connection.webhookPath, `/webhooks/index/${hold.body.connection.id}`);
+  assert.equal(hold.body.connection.webhookUrl, `https://pebble.example/webhooks/index/${hold.body.connection.id}`);
+  const mcp = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
+    { connectionType: 'mcp', label: 'Proxy organizer' }
+  );
+  assert.equal(mcp.status, 201);
+  assert.equal(mcp.body.connection.connectionType, 'mcp');
+  assert.deepEqual(mcp.body.connection.scopes, ['mcp:invoke']);
+  assert.equal(mcp.body.connection.indexTrigger, null);
+  assert.equal(mcp.body.connection.webhookPath, null);
+  assert.equal(mcp.body.connection.webhookUrl, '');
+  assert.equal(mcp.body.connection.mcpUrl, 'https://pebble.example/mcp');
+  assert.equal(mcp.body.connection.openAiBaseUrl, '');
+  assert.equal(mcp.body.connection.speechUrl, '');
+  assert.match(mcp.body.token, /^pp_/);
+
+  const createdPebble = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'Pebble Time', type: 'pebble'
+  });
+  const watchApp = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${createdPebble.body.device.id}/connections`,
+    { label: 'Assistant watch app', scopes: ['ai:chat', 'tts:speech'], aliases: ['pebble-assistant'] }
+  );
+  assert.equal(watchApp.body.connection.indexTrigger, null);
+  assert.equal(watchApp.body.connection.connectionType, 'client');
+  assert.deepEqual(watchApp.body.connection.scopes, ['ai:chat', 'tts:speech']);
+  assert.deepEqual(watchApp.body.connection.aliases, ['pebble-assistant']);
+  assert.equal(watchApp.body.connection.openAiBaseUrl, 'https://pebble.example/v1');
+  assert.equal(watchApp.body.connection.speechUrl, 'https://pebble.example/v1/audio/speech');
+  assert.equal(watchApp.body.connection.mcpUrl, '');
+
+  const listed = await dispatch(app.router, 'GET', '/admin/api/device-groups');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.devices.length, 2);
+  const index = listed.body.devices.find((device) => device.id === createdIndex.body.device.id);
+  assert.equal(index.connections.length, 2);
+  assert.equal(index.connections.some((connection) => connection.id === hold.body.connection.id
+    && connection.connectionType === 'webhook'), true);
+  assert.equal(index.connections.some((connection) => connection.id === mcp.body.connection.id && connection.connectionType === 'mcp'), true);
+  assert.equal(JSON.stringify(listed.body).includes(hold.body.token), false);
+  const pebble = listed.body.devices.find((device) => device.id === createdPebble.body.device.id);
+  assert.equal(pebble.connections[0].label, 'Assistant watch app');
+  assert.equal(pebble.connections[0].connectionType, 'client');
+  const flat = await dispatch(app.router, 'GET', '/admin/api/devices');
+  assert.equal(flat.body.devices.find((connection) => connection.id === hold.body.connection.id).connectionType, 'webhook');
+  assert.equal(flat.body.devices.find((connection) => connection.id === mcp.body.connection.id).connectionType, 'mcp');
+  assert.equal(flat.body.devices.find((connection) => connection.id === watchApp.body.connection.id).connectionType, 'client');
+
+  await dispatch(app.router, 'POST', '/admin/api/notes', {
+    deviceId: hold.body.connection.id, title: 'Index note', body: 'Owned by the hold connection'
+  });
+  const notes = await dispatch(app.router, 'GET', '/admin/api/notes');
+  assert.equal(notes.body.notes[0].device_name, 'My Index');
+  assert.equal(notes.body.notes[0].connection_label, 'Ring Button Hold & Talk');
+  assert.equal(notes.body.notes[0].owner_device_id, createdIndex.body.device.id);
+
+  await assert.rejects(
+    dispatch(
+      app.router,
+      'POST',
+      `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
+      { scopes: ['webhook:write', 'ai:chat'] }
+    ),
+    (error) => error.code === 'invalid_index_scopes'
+  );
+  await assert.rejects(
+    dispatch(
+      app.router,
+      'POST',
+      `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
+      { connectionType: 'mcp', scopes: ['webhook:write'] }
+    ),
+    (error) => error.code === 'invalid_index_scopes'
+  );
+  await assert.rejects(
+    dispatch(app.router, 'POST', '/admin/api/device-groups', { name: 'Mystery', type: 'ring' }),
+    (error) => error.code === 'invalid_device_type'
+  );
+  await assert.rejects(
+    dispatch(app.router, 'POST', '/admin/api/device-groups/missing/connections', {}),
+    (error) => error.code === 'device_group_not_found'
+  );
+  await assert.rejects(
+    dispatch(app.router, 'POST', `/admin/api/device-groups/${createdPebble.body.device.id}/connections`, {
+      scopes: 'ai:chat'
+    }),
+    (error) => error.code === 'invalid_scopes'
+  );
+  for (const connectionType of ['webhook', 'mcp']) {
+    await assert.rejects(
+      dispatch(app.router, 'POST', `/admin/api/device-groups/${createdPebble.body.device.id}/connections`, {
+        connectionType
+      }),
+      (error) => error.code === 'invalid_connection_type'
+    );
+  }
+  await assert.rejects(
+    dispatch(app.router, 'POST', '/admin/api/devices', {
+      name: 'Other client', connectionType: 'webhook'
+    }),
+    (error) => error.code === 'invalid_connection_type'
+  );
+  await assert.rejects(
+    dispatch(app.router, 'POST', `/admin/api/device-groups/${createdPebble.body.device.id}/connections`, {
+      scopes: ['ai:chat'], expiresIn: 'forever'
+    }),
+    (error) => error.code === 'invalid_expiry'
+  );
+});
+
+test('admin removes only parent devices that have no connections', async (t) => {
+  const app = fixture(t);
+  const empty = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'Accidental device', type: 'index'
+  });
+  const populated = await dispatch(app.router, 'POST', '/admin/api/device-groups', {
+    name: 'Configured device', type: 'index'
+  });
+  const connection = await dispatch(
+    app.router,
+    'POST',
+    `/admin/api/device-groups/${populated.body.device.id}/connections`,
+    { connectionType: 'mcp' }
+  );
+
+  const removed = await dispatch(app.router, 'DELETE', `/admin/api/device-groups/${empty.body.device.id}`);
+  assert.equal(removed.status, 200);
+  assert.equal(app.db.prepare('SELECT id FROM client_devices WHERE id = ?').get(empty.body.device.id), undefined);
+
+  await assert.rejects(
+    dispatch(app.router, 'DELETE', `/admin/api/device-groups/${empty.body.device.id}`),
+    (error) => error.status === 404 && error.code === 'device_group_not_found'
+  );
+  await assert.rejects(
+    dispatch(app.router, 'DELETE', `/admin/api/device-groups/${populated.body.device.id}`),
+    (error) => error.status === 409 && error.code === 'device_group_not_empty'
+  );
+  assert.ok(app.db.prepare('SELECT id FROM client_devices WHERE id = ?').get(populated.body.device.id));
+  assert.ok(app.db.prepare('SELECT id FROM device_credentials WHERE id = ?').get(connection.body.connection.id));
+
+  await dispatch(app.router, 'DELETE', `/admin/api/devices/${connection.body.connection.id}`);
+  await assert.rejects(
+    dispatch(app.router, 'DELETE', `/admin/api/device-groups/${populated.body.device.id}`),
+    (error) => error.status === 409 && error.code === 'device_group_not_empty'
+  );
 });
 
 test('admin exposes and persists exact public client endpoints', async (t) => {

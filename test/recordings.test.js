@@ -115,7 +115,12 @@ async function fixture(t, overrides = {}) {
   const authCalls = [];
   const authenticate = async (req, scope, options = {}) => {
     authCalls.push({ scope, options });
-    return { id: req.headers['x-test-device-id'] || 'device-1', scopes: ['webhook:write'], aliases: [] };
+    return {
+      id: req.headers['x-test-device-id'] || 'device-1',
+      index_trigger: req.headers['x-test-index-trigger-config'] || null,
+      scopes: ['webhook:write'],
+      aliases: []
+    };
   };
   const deps = { db, cryptoService, config, authenticate, fetchImpl: (...args) => globalThis.fetch(...args) };
   registerRecordingRoutes(publicRouter, adminRouter, deps);
@@ -215,6 +220,78 @@ test('Index webhook is bounded, authenticated, idempotent, and manageable throug
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcripts').get().count, 0);
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcription_jobs').get().count, 0);
   await assert.rejects(fs.promises.stat(storedAudioPath), (error) => error.code === 'ENOENT');
+});
+
+test('route-specific Index webhooks bind the URL to its authenticated connection and gesture', async (t) => {
+  const app = await fixture(t);
+  const form = multipart({ transcription: 'Remember the route', client: 'ring' });
+  const accepted = await dispatch(app.publicRouter, {
+    method: 'POST',
+    url: '/webhooks/index/device-1',
+    headers: {
+      'content-type': form.contentType,
+      'x-test-device-id': 'device-1',
+      'x-test-index-trigger-config': 'single-click-hold',
+      'x-index-trigger': 'single-click-hold',
+      'idempotency-key': 'route-specific-1'
+    },
+    body: form.body
+  });
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(accepted.json.connectionId, 'device-1');
+  assert.equal(accepted.json.trigger, 'single-click-hold');
+  assert.equal(app.db.prepare('SELECT device_id FROM recordings').get().device_id, 'device-1');
+
+  const wrongConnection = multipart({ transcription: 'Wrong connection', client: 'ring' });
+  await assert.rejects(
+    dispatch(app.publicRouter, {
+      method: 'POST',
+      url: '/webhooks/index/device-2',
+      headers: {
+        'content-type': wrongConnection.contentType,
+        'x-test-device-id': 'device-1',
+        'idempotency-key': 'route-specific-wrong'
+      },
+      body: wrongConnection.body
+    }),
+    (error) => error.status === 403 && error.code === 'connection_mismatch'
+  );
+
+  const wrongGesture = multipart({ transcription: 'Wrong gesture', client: 'ring' });
+  await assert.rejects(
+    dispatch(app.publicRouter, {
+      method: 'POST',
+      url: '/webhooks/index/device-1',
+      headers: {
+        'content-type': wrongGesture.contentType,
+        'x-test-device-id': 'device-1',
+        'x-test-index-trigger-config': 'single-click-hold',
+        'x-index-trigger': 'double-click-hold',
+        'idempotency-key': 'route-specific-gesture'
+      },
+      body: wrongGesture.body
+    }),
+    (error) => error.status === 409 && error.code === 'index_trigger_mismatch'
+  );
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM recordings').get().count, 1);
+
+  const noObservedGesture = multipart({ transcription: 'Legacy retry without gesture', client: 'ring' });
+  const acceptedWithoutGesture = await dispatch(app.publicRouter, {
+    method: 'POST',
+    url: '/webhooks/index/device-1',
+    headers: {
+      'content-type': noObservedGesture.contentType,
+      'x-test-device-id': 'device-1',
+      'x-test-index-trigger-config': 'single-click-hold',
+      'idempotency-key': 'route-specific-no-gesture'
+    },
+    body: noObservedGesture.body
+  });
+  assert.equal(acceptedWithoutGesture.statusCode, 202);
+  assert.equal(acceptedWithoutGesture.json.trigger, 'single-click-hold');
+  const inferredRoute = app.db.prepare('SELECT trigger FROM recordings WHERE id = ?')
+    .get(acceptedWithoutGesture.json.id);
+  assert.equal(inferredRoute.trigger, 'single-click-hold');
 });
 
 test('CoreApp test events are acknowledged without creating recordings or jobs', async (t) => {

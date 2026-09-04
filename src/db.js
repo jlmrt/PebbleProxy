@@ -7,9 +7,20 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS client_devices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('index','pebble','other')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS device_credentials (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  owner_device_id TEXT REFERENCES client_devices(id),
+  connection_label TEXT NOT NULL DEFAULT '',
+  index_trigger TEXT CHECK(index_trigger IS NULL OR index_trigger IN ('single-click-hold','double-click-hold','all')),
   secret_hash TEXT NOT NULL,
   secret_prefix TEXT NOT NULL,
   scopes_json TEXT NOT NULL,
@@ -248,7 +259,38 @@ CREATE INDEX IF NOT EXISTS idx_processing_actions_status ON processing_actions(s
 
 function ensureColumn(db, table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  if (columns.some((item) => item.name === column)) return;
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  } catch (error) {
+    const refreshed = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!refreshed.some((item) => item.name === column)) throw error;
+  }
+}
+
+function migrateCredentialOwners(db) {
+  const credentials = db.prepare(`SELECT c.id, c.name, c.owner_device_id, c.connection_label,
+      c.created_at, c.updated_at
+    FROM device_credentials c
+    LEFT JOIN client_devices d ON d.id = c.owner_device_id
+    WHERE c.owner_device_id IS NULL OR trim(c.connection_label) = '' OR d.id IS NULL`).all();
+  if (!credentials.length) return;
+
+  transaction(db, () => {
+    for (const credential of credentials) {
+      const ownerId = credential.owner_device_id || credential.id;
+      db.prepare(`INSERT OR IGNORE INTO client_devices (id, name, type, created_at, updated_at)
+        VALUES (?, ?, 'other', ?, ?)`).run(
+        ownerId,
+        credential.name,
+        credential.created_at,
+        credential.updated_at
+      );
+      db.prepare(`UPDATE device_credentials SET owner_device_id = ?,
+        connection_label = CASE WHEN trim(connection_label) = '' THEN name ELSE connection_label END
+        WHERE id = ?`).run(ownerId, credential.id);
+    }
+  });
 }
 
 export function nowIso() {
@@ -262,8 +304,13 @@ export function createDatabase(databasePath) {
   db.exec('PRAGMA foreign_keys=ON;');
   db.exec('PRAGMA busy_timeout=5000;');
   db.exec(SCHEMA);
+  ensureColumn(db, 'device_credentials', 'owner_device_id', 'TEXT REFERENCES client_devices(id)');
+  ensureColumn(db, 'device_credentials', 'connection_label', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'device_credentials', 'index_trigger', "TEXT CHECK(index_trigger IS NULL OR index_trigger IN ('single-click-hold','double-click-hold','all'))");
   ensureColumn(db, 'recordings', 'trigger', 'TEXT');
   ensureColumn(db, 'reminders', 'due_text', 'TEXT');
+  migrateCredentialOwners(db);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_device_credentials_owner ON device_credentials(owner_device_id, created_at)');
 
   const now = nowIso();
   db.prepare(`INSERT OR IGNORE INTO agent_profiles

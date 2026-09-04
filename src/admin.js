@@ -1,6 +1,15 @@
 import crypto from 'node:crypto';
 import { createNote, createReminder } from './actions.js';
-import { createDevice, listDevices, resetDeviceSessions, revokeDevice } from './auth.js';
+import {
+  createClientDevice,
+  createDevice,
+  createDeviceConnection,
+  deleteEmptyClientDevice,
+  listClientDevices,
+  listDevices,
+  resetDeviceSessions,
+  revokeDevice
+} from './auth.js';
 import { HttpError, readJson, sendJson, safeJson } from './http.js';
 import { nowIso } from './db.js';
 import { checkSttHealth } from './recordings.js';
@@ -306,20 +315,57 @@ function connectivityView(db, config) {
   };
 }
 
+function credentialInput(input) {
+  const expiryDurations = { '30d': 30 * 86_400_000, '90d': 90 * 86_400_000, '1y': 365 * 86_400_000 };
+  if (input.expiresIn != null && !['never', ...Object.keys(expiryDurations)].includes(String(input.expiresIn))) {
+    throw new HttpError(400, 'invalid_expiry', 'Select a supported token expiry');
+  }
+  const expiresAt = input.expiresAt || (expiryDurations[input.expiresIn]
+    ? new Date(Date.now() + expiryDurations[input.expiresIn]).toISOString()
+    : null);
+  return {
+    ...input,
+    requestsPerMinute: input.requestsPerMinute ?? input.rateLimit,
+    expiresAt
+  };
+}
+
+function adminConnectionView(connection, publicBaseUrl) {
+  const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
+  return {
+    ...connection,
+    webhookUrl: connection.webhookPath && publicBaseUrl ? `${publicBaseUrl}${connection.webhookPath}` : '',
+    openAiBaseUrl: scopes.includes('ai:chat') && publicBaseUrl ? `${publicBaseUrl}/v1` : '',
+    speechUrl: scopes.includes('tts:speech') && publicBaseUrl ? `${publicBaseUrl}/v1/audio/speech` : '',
+    mcpUrl: scopes.includes('mcp:invoke') && publicBaseUrl ? `${publicBaseUrl}/mcp` : ''
+  };
+}
+
+function adminDeviceGroupView(device, publicBaseUrl) {
+  return {
+    ...device,
+    connections: device.connections.map((connection) => adminConnectionView(connection, publicBaseUrl))
+  };
+}
+
 function overview(db, config) {
   const count = (table, where = '') => db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count;
+  const activeConnections = db.prepare(`SELECT COUNT(*) AS count FROM device_credentials
+    WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`).get(nowIso()).count;
   const stt = db.prepare('SELECT health_status, enabled FROM stt_config WHERE id = 1').get();
   const tts = db.prepare('SELECT health_status, enabled FROM tts_config WHERE id = 1').get();
   const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0-test.8',
+    version: '0.1.0-test.9',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,
     connectivity,
     counts: {
-      activeDevices: count('device_credentials', 'WHERE revoked_at IS NULL'),
+      devices: count('client_devices'),
+      activeConnections,
+      activeDevices: activeConnections,
       backends: count('ai_providers', 'WHERE enabled = 1'),
       aliases: count('model_aliases', 'WHERE enabled = 1'),
       recordings: count('recordings'),
@@ -354,15 +400,7 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
   router.add('GET', '/admin/api/devices', (_req, res) => sendJson(res, 200, { devices: listDevices(db) }));
   router.add('POST', '/admin/api/devices', async (req, res) => {
     const input = await readJson(req, config.maxJsonBytes);
-    const expiryDurations = { '30d': 30 * 86_400_000, '90d': 90 * 86_400_000, '1y': 365 * 86_400_000 };
-    const expiresAt = input.expiresAt || (expiryDurations[input.expiresIn]
-      ? new Date(Date.now() + expiryDurations[input.expiresIn]).toISOString()
-      : null);
-    sendJson(res, 201, createDevice(db, cryptoService, {
-      ...input,
-      requestsPerMinute: input.requestsPerMinute ?? input.rateLimit,
-      expiresAt
-    }));
+    sendJson(res, 201, createDevice(db, cryptoService, credentialInput(input)));
   });
   router.add('DELETE', '/admin/api/devices/:id', (_req, res, { params }) => {
     revokeDevice(db, params.id);
@@ -371,6 +409,30 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
   router.add('POST', '/admin/api/devices/:id/reset-sessions', (_req, res, { params }) => {
     resetDeviceSessions(db, params.id);
     sendJson(res, 200, { ok: true });
+  });
+
+  router.add('GET', '/admin/api/device-groups', (_req, res) => {
+    const publicBaseUrl = configuredPublicBaseUrl(db, config);
+    sendJson(res, 200, {
+      devices: listClientDevices(db).map((device) => adminDeviceGroupView(device, publicBaseUrl))
+    });
+  });
+  router.add('POST', '/admin/api/device-groups', async (req, res) => {
+    const input = await readJson(req, config.maxJsonBytes);
+    sendJson(res, 201, { device: createClientDevice(db, input) });
+  });
+  router.add('DELETE', '/admin/api/device-groups/:id', (_req, res, { params }) => {
+    deleteEmptyClientDevice(db, params.id);
+    sendJson(res, 200, { ok: true });
+  });
+  router.add('POST', '/admin/api/device-groups/:id/connections', async (req, res, { params }) => {
+    const input = credentialInput(await readJson(req, config.maxJsonBytes));
+    const created = createDeviceConnection(db, cryptoService, params.id, input);
+    const publicBaseUrl = configuredPublicBaseUrl(db, config);
+    sendJson(res, 201, {
+      connection: adminConnectionView(created.connection, publicBaseUrl),
+      token: created.token
+    });
   });
 
   router.add('GET', '/admin/api/backends', (_req, res) => {
@@ -574,7 +636,8 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
 
   router.add('GET', '/admin/api/notes', (_req, res) => {
     const notes = db.prepare(`SELECT n.id, n.title, n.body, n.archived, n.created_at, n.updated_at,
-      d.id AS device_id, d.name AS device_name FROM notes n JOIN device_credentials d ON d.id = n.device_id
+      d.id AS device_id, d.name AS device_name, d.owner_device_id, d.connection_label
+      FROM notes n JOIN device_credentials d ON d.id = n.device_id
       ORDER BY n.updated_at DESC LIMIT 200`).all();
     sendJson(res, 200, { notes });
   });
@@ -597,7 +660,8 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
   });
   router.add('GET', '/admin/api/reminders', (_req, res) => {
     const reminders = db.prepare(`SELECT r.id, r.title, r.due_at, r.due_text, r.timezone, r.completed_at, r.created_at, r.updated_at,
-      d.id AS device_id, d.name AS device_name FROM reminders r JOIN device_credentials d ON d.id = r.device_id
+      d.id AS device_id, d.name AS device_name, d.owner_device_id, d.connection_label
+      FROM reminders r JOIN device_credentials d ON d.id = r.device_id
       ORDER BY r.completed_at IS NOT NULL, r.due_at IS NULL, r.due_at LIMIT 200`).all();
     sendJson(res, 200, { reminders });
   });

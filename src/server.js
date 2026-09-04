@@ -28,7 +28,7 @@ function publicCorsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Widget-Token, X-Pebble-Token, X-Webhook-Token, X-Pebble-Session, X-Index-Trigger, X-Index-Test, X-Audio-Size, Idempotency-Key, MCP-Protocol-Version',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Widget-Token, X-Pebble-Token, X-Webhook-Token, X-Pebble-Session, X-Index-Trigger, X-Index-Test, X-Audio-Size, Idempotency-Key, MCP-Protocol-Version, Mcp-Method, Mcp-Name',
     'Access-Control-Expose-Headers': 'X-Request-Id, Retry-After, MCP-Protocol-Version',
     'Access-Control-Max-Age': '86400'
   };

@@ -317,6 +317,7 @@ async function saveAudio(recordingsDir, id, audio) {
 function webhookAck(row, deduplicated) {
   return {
     id: row.id,
+    connectionId: row.device_id,
     state: row.stt_state,
     receivedAt: row.received_at,
     hasAudio: Boolean(row.audio_path),
@@ -435,19 +436,31 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
   if (typeof authenticate !== 'function') throw new TypeError('recordings requires authenticate(req, scope)');
   cleanupAudioTombstones(config.recordingsDir);
 
-  publicRouter.add('POST', '/webhooks/index', async (req, res) => {
+  const receiveIndexWebhook = async (req, res, context = {}) => {
     const device = await authenticate(req, 'webhook:write', { allowWebhookHeaders: true });
     if (!device?.id) throw new HttpError(401, 'invalid_token', 'Authentication failed');
+    const connectionId = context.params?.connectionId;
+    if (connectionId && connectionId !== device.id) {
+      throw new HttpError(403, 'connection_mismatch', 'This token is not valid for the requested webhook connection');
+    }
     const lease = limiter?.acquire ? await limiter.acquire(device) : null;
     try {
 
       const buffer = await readBuffer(req, config.maxWebhookBytes || 16 * 1024 * 1024);
       const payload = parseIndexWebhook(req, buffer);
+      const configuredTrigger = device.indexTrigger || device.index_trigger || null;
+      if (!payload.test && payload.trigger && configuredTrigger && configuredTrigger !== 'all' && configuredTrigger !== payload.trigger) {
+        throw new HttpError(409, 'index_trigger_mismatch', 'This webhook connection is assigned to a different Index gesture');
+      }
+      if (!payload.test && !payload.trigger && configuredTrigger && configuredTrigger !== 'all') {
+        payload.trigger = configuredTrigger;
+      }
       if (payload.test) {
         return sendJson(res, 202, {
           accepted: true,
           test: true,
           stored: false,
+          connectionId: device.id,
           trigger: payload.trigger || 'test-event'
         }, PUBLIC_HEADERS);
       }
@@ -515,6 +528,7 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
 
       return sendJson(res, 202, webhookAck({
         id,
+        device_id: device.id,
         stt_state: 'received',
         received_at: now,
         audio_path: savedAudio.filename,
@@ -524,7 +538,10 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
     } finally {
       try { lease?.release?.(); } catch {}
     }
-  });
+  };
+
+  publicRouter.add('POST', '/webhooks/index', receiveIndexWebhook);
+  publicRouter.add('POST', '/webhooks/index/:connectionId', receiveIndexWebhook);
 
   adminRouter.add('GET', '/admin/api/recordings', async (_req, res, context) => {
     const limit = integerQuery(context.url.searchParams.get('limit'), 50, 1, 200);

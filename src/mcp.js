@@ -40,8 +40,8 @@ const TOOLS = [
   },
   {
     name: 'reminders_create',
-    title: 'Create reminder',
-    description: 'Create a reminder for the authenticated Pebble device.',
+    title: 'Create local reminder',
+    description: 'Create a reminder entry in the authenticated device workspace. This stores the reminder in Pebble Proxy; it does not schedule a phone notification.',
     inputSchema: {
       type: 'object', additionalProperties: false, required: ['title'],
       properties: { title: { type: 'string', minLength: 1, maxLength: 200 }, due_at: { type: ['string', 'null'], description: 'ISO 8601 date-time' }, timezone: { type: ['string', 'null'], maxLength: 80 } }
@@ -80,8 +80,41 @@ function rpcError(id, code, message, data) {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } };
 }
 
+function httpsOrigin(value) {
+  if (typeof value !== 'string' || value !== value.trim() || /[\r\n]/.test(value)) return '';
+  let parsed;
+  try { parsed = new URL(value); }
+  catch { return ''; }
+  if (
+    parsed.protocol !== 'https:'
+    || !parsed.hostname
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+    || parsed.pathname !== '/'
+  ) return '';
+  return parsed.origin;
+}
+
+function configuredPublicOrigin(db, config) {
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'public_base_url'").get()?.value;
+  return httpsOrigin(stored || config.publicBaseUrl || '');
+}
+
+function validateOrigin(req, db, config) {
+  const rawOrigin = req.headers.origin;
+  if (rawOrigin == null) return;
+  const origin = Array.isArray(rawOrigin) ? '' : httpsOrigin(rawOrigin);
+  const trustedOrigin = configuredPublicOrigin(db, config);
+  if (!origin || !trustedOrigin || origin !== trustedOrigin) {
+    throw new HttpError(403, 'invalid_origin', 'Cross-origin MCP requests are not allowed');
+  }
+}
+
 export function registerMcpRoutes(router, { db, config, authenticate, limiter }) {
   router.add('POST', '/mcp', async (req, res) => {
+    validateOrigin(req, db, config);
     const device = await authenticate(req, 'mcp:invoke');
     const lease = limiter.acquire(device);
     try {
@@ -98,8 +131,8 @@ export function registerMcpRoutes(router, { db, config, authenticate, limiter })
         rpcResult = {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'Pebble Proxy Notes & Reminders', version: '0.1.0-test.8' },
-          instructions: 'Tools are private to the authenticated Pebble device. Deletion tools require confirm=true after explicit user confirmation.'
+          serverInfo: { name: 'Pebble Proxy Notes & Reminders', version: '0.1.0-test.9' },
+          instructions: 'Tools use the private workspace shared by this device’s connections. Reminder tools store local Pebble Proxy entries and do not schedule phone notifications. Deletion tools require confirm=true after explicit user confirmation.'
         };
       } else if (payload.method === 'ping') {
         rpcResult = {};
@@ -131,6 +164,7 @@ export function registerMcpRoutes(router, { db, config, authenticate, limiter })
   });
 
   router.add('GET', '/mcp', async (req, res) => {
+    validateOrigin(req, db, config);
     await authenticate(req, 'mcp:invoke');
     throw new HttpError(405, 'method_not_allowed', 'This server uses stateless Streamable HTTP; send JSON-RPC requests with POST', { Allow: 'POST' });
   });

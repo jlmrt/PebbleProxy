@@ -115,7 +115,7 @@ async function routeTranscript(deps, claim) {
     body: JSON.stringify({
       text: claim.transcript_text,
       context: {
-        date: new Date().toISOString(),
+        date: claim.recorded_at || claim.received_at || new Date().toISOString(),
         device: 'Pebble',
         trigger: claim.trigger || null
       }
@@ -151,7 +151,10 @@ function parseDecision(value) {
     throw new ProcessingError('router_inference_failed', 'The local intent router could not classify the transcript');
   }
   const calls = Array.isArray(value.function_calls) ? value.function_calls : [];
-  const confidence = typeof value.confidence === 'number' && Number.isFinite(value.confidence)
+  const confidence = typeof value.confidence === 'number'
+    && Number.isFinite(value.confidence)
+    && value.confidence >= 0
+    && value.confidence <= 1
     ? value.confidence
     : null;
   return { calls, confidence, raw: value };
@@ -162,6 +165,164 @@ function safeMessage(value, fallback = 'Transcript processing failed') {
     .replace(/[\r\n\u0000]+/g, ' ')
     .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [redacted]')
     .slice(0, 500);
+}
+
+function explicitReminderVerification(decision, transcript) {
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  const source = typeof transcript === 'string' ? transcript : '';
+  const prefix = /^\s*remind me\b/i.exec(source);
+  const validation = decision.raw?.validation;
+  const ungrounded = validation?.ungrounded;
+  const onlyExpectedValidation = Boolean(validation)
+    && typeof validation === 'object'
+    && !Array.isArray(validation)
+    && Object.keys(validation).every((key) => key === 'ungrounded' || key === 'negation');
+  const negationAcceptable = onlyExpectedValidation
+    && (!Object.hasOwn(validation, 'negation') || validation.negation === false);
+  const onlyMessageUngrounded = Array.isArray(ungrounded)
+    && ungrounded.length === 1
+    && ungrounded[0] === 'create_reminder.message'
+    && negationAcceptable;
+  const dateTimeHuman = call?.arguments?.date_time_human;
+  const dateTextValid = typeof dateTimeHuman === 'string'
+    && dateTimeHuman.trim().length > 0
+    && dateTimeHuman.length <= 120;
+  const searchFrom = prefix ? prefix[0].length : 0;
+  const escapedDateText = dateTextValid
+    ? dateTimeHuman.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    : '';
+  const dateMatch = escapedDateText
+    ? new RegExp(escapedDateText, 'iu').exec(source.slice(searchFrom))
+    : null;
+  const dateIndex = dateMatch ? searchFrom + dateMatch.index : -1;
+  const groundedDateText = dateIndex >= 0
+    ? source.slice(dateIndex, dateIndex + dateMatch[0].length)
+    : '';
+  const rawRemainder = prefix && dateIndex >= searchFrom
+    ? `${source.slice(prefix[0].length, dateIndex)} ${source.slice(dateIndex + dateMatch[0].length)}`
+    : '';
+  const title = rawRemainder
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:\-\u2013\u2014]+/, '')
+    .replace(/^(?:to|that|about)\b[\s,;:\-\u2013\u2014]*/i, '')
+    .replace(/\s+([.,!?;:])/g, '$1')
+    .trim();
+  const hasSecondExplicitCommand = /\b(?:and|then)\s+(?:remind me\b|(?:(?:take|make)\s+(?:a\s+)?note\b)|note\s*:)/iu.test(title);
+  const checks = {
+    singleCreateReminder: call?.name === 'create_reminder',
+    explicitCommandPrefix: Boolean(prefix),
+    onlyExpectedValidation,
+    onlyMessageUngrounded,
+    dateTimeExactSubstring: dateIndex >= searchFrom,
+    noSecondExplicitCommand: !hasSecondExplicitCommand,
+    derivedTitleAvailable: title.length <= 200 && /[\p{L}\p{N}]/u.test(title)
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  return {
+    policy: 'explicit_reminder_v1',
+    accepted,
+    checks,
+    provenance: accepted ? {
+      title_source: 'original_transcript_remainder',
+      due_text_source: 'exact_original_transcript_substring'
+    } : {},
+    action: accepted ? {
+      name: 'create_reminder',
+      arguments: { title, due_text: groundedDateText }
+    } : null
+  };
+}
+
+function explicitNoteVerification(decision, transcript) {
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  const source = typeof transcript === 'string' ? transcript : '';
+  const prefix = /^\s*(?:(?:take|make)\s+(?:a\s+)?note(?:(?:\s+(?:that|about)\b)|\s*:)|note(?:\s+that\b|\s*:)|remember\s+that\b)\s*[,;\-\u2013\u2014]?\s*/iu.exec(source);
+  const validation = decision.raw?.validation;
+  const ungrounded = validation?.ungrounded;
+  const allowedUngrounded = new Set(['create_note.text', 'create_note.title']);
+  const onlyExpectedValidation = Boolean(validation)
+    && typeof validation === 'object'
+    && !Array.isArray(validation)
+    && Object.keys(validation).every((key) => key === 'ungrounded' || key === 'negation');
+  const negationAcceptable = onlyExpectedValidation
+    && (!Object.hasOwn(validation, 'negation') || validation.negation === false);
+  const onlyNoteFieldsUngrounded = Array.isArray(ungrounded)
+    && ungrounded.length > 0
+    && ungrounded.every((field) => allowedUngrounded.has(field))
+    && negationAcceptable;
+  const body = prefix ? source.slice(prefix[0].length).trim() : '';
+  const hasSecondReminderCommand = /\b(?:and|then)\s+remind me\b/iu.test(body);
+  const titleSource = body.split(/(?:\r?\n|(?<=[.!?])\s+)/u)[0].trim();
+  const title = titleSource.length <= 120 ? titleSource : `${titleSource.slice(0, 119).trimEnd()}\u2026`;
+  const checks = {
+    singleCreateNote: call?.name === 'create_note',
+    explicitCommandPrefix: Boolean(prefix),
+    onlyExpectedValidation,
+    onlyNoteFieldsUngrounded,
+    noSecondReminderCommand: !hasSecondReminderCommand,
+    derivedBodyAvailable: body.length <= 8000 && /[\p{L}\p{N}]/u.test(body),
+    derivedTitleAvailable: title.length <= 120 && /[\p{L}\p{N}]/u.test(title)
+  };
+  const accepted = Object.values(checks).every(Boolean);
+  return {
+    policy: 'explicit_note_v1',
+    accepted,
+    checks,
+    provenance: accepted ? {
+      body_source: 'original_transcript_remainder',
+      title_source: 'original_transcript_remainder'
+    } : {},
+    action: accepted ? { name: 'create_note', arguments: { title, body } } : null
+  };
+}
+
+function lowConfidenceVerification(decision, transcript) {
+  const call = decision.calls.length === 1 ? decision.calls[0] : null;
+  if (call?.name === 'create_reminder') return explicitReminderVerification(decision, transcript);
+  if (call?.name === 'create_note') return explicitNoteVerification(decision, transcript);
+  return {
+    policy: 'explicit_create_action_v1',
+    accepted: false,
+    checks: { supportedExplicitAction: false },
+    provenance: {},
+    action: null
+  };
+}
+
+function attachDecisionMetadata(decision, claim, threshold, verification = null) {
+  decision.raw = {
+    ...decision.raw,
+    proxy_decision: {
+      confidence_threshold: threshold,
+      config_revision: Number(claim.processing_config.revision),
+      verification: verification ? {
+        policy: verification.policy,
+        outcome: verification.accepted ? 'accepted' : 'rejected',
+        checks: verification.checks,
+        ...verification.provenance
+      } : {
+        policy: 'confidence_threshold_v1',
+        outcome: 'not_required'
+      }
+    }
+  };
+}
+
+function logProcessingDecision(deps, claim, decision, threshold, outcome, reasonCode = null) {
+  const actionTypes = (decision?.calls || []).slice(0, 5).map((call) =>
+    ACTION_TYPES.has(call?.name) ? call.name : 'unsupported'
+  );
+  deps.log?.(outcome === 'needs_review' || outcome === 'failed' ? 'warn' : 'info', 'processing_decision', {
+    processingJobId: claim.id,
+    recordingId: claim.recording_id,
+    transcriptSource: claim.transcript_source,
+    configRevision: Number(claim.processing_config.revision),
+    confidence: decision?.confidence ?? null,
+    confidenceThreshold: threshold,
+    actionTypes,
+    outcome,
+    reasonCode
+  });
 }
 
 function maxAttempts(config) {
@@ -200,7 +361,7 @@ function claimNextJob(db, leaseMs) {
 
     const config = currentProcessingConfig(db);
     if (!config?.enabled) return null;
-    const candidate = db.prepare(`SELECT j.*, r.device_id, r.trigger,
+    const candidate = db.prepare(`SELECT j.*, r.device_id, r.trigger, r.recorded_at, r.received_at,
         t.id AS selected_transcript_id, t.source AS selected_transcript_source, t.text AS transcript_text
       FROM processing_jobs j
       JOIN recordings r ON r.id = j.recording_id
@@ -379,16 +540,40 @@ async function processClaim(deps, claim) {
     markRouterHealth(deps.db, 'healthy');
     const threshold = Number(claim.processing_config.confidence_threshold);
     if (decision.confidence == null || decision.confidence < threshold) {
-      markReview(deps.db, claim, 'low_confidence', 'Needle confidence was below the configured threshold', decision);
+      const verification = decision.confidence == null
+        ? {
+            policy: 'confidence_required_v1',
+            accepted: false,
+            checks: { confidenceAvailable: false },
+            provenance: {},
+            action: null
+          }
+        : lowConfidenceVerification(decision, claim.transcript_text);
+      attachDecisionMetadata(decision, claim, threshold, verification);
+      if (!verification?.accepted) {
+        logProcessingDecision(deps, claim, decision, threshold, 'needs_review', 'low_confidence');
+        markReview(deps.db, claim, 'low_confidence', 'Needle confidence was below the configured threshold', decision);
+        return;
+      }
+      const verifiedReason = verification.policy === 'explicit_note_v1'
+        ? 'verified_explicit_note'
+        : 'verified_explicit_reminder';
+      logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed', verifiedReason);
+      await executeAction(deps, claim, decision, verification.action);
       return;
     }
+    attachDecisionMetadata(decision, claim, threshold);
     const action = normalizeAction(decision);
     if (action.review) {
+      logProcessingDecision(deps, claim, decision, threshold, 'needs_review', action.review[0]);
       markReview(deps.db, claim, action.review[0], action.review[1], decision);
       return;
     }
+    logProcessingDecision(deps, claim, decision, threshold, 'execution_allowed');
     await executeAction(deps, claim, decision, action);
   } catch (error) {
+    const threshold = Number(claim.processing_config.confidence_threshold);
+    logProcessingDecision(deps, claim, null, threshold, 'failed', error?.code || 'processing_failed');
     retryOrFail(deps.db, claim, error, deps.config);
     markRouterHealth(deps.db, 'unavailable', error?.message);
   }
@@ -465,34 +650,55 @@ export function startProcessingWorker(deps) {
 }
 
 export function listProcessingJobs(db, limit = 100) {
-  return db.prepare(`SELECT j.*, r.trigger, r.received_at, d.name AS device_name,
-      a.action_type, a.status AS action_status, a.result_json, a.error_code AS action_error_code,
+  return db.prepare(`SELECT j.*, r.trigger, r.recorded_at, r.received_at, d.name AS device_name,
+      d.connection_label, d.owner_device_id,
+      t.id AS listed_transcript_id, t.source AS listed_transcript_source, t.text AS transcript_text,
+      a.action_type, a.status AS action_status, a.arguments_json AS action_arguments_json,
+      a.result_json, a.error_code AS action_error_code,
       a.error_message AS action_error_message
     FROM processing_jobs j
     JOIN recordings r ON r.id = j.recording_id
     JOIN device_credentials d ON d.id = r.device_id
+    LEFT JOIN transcripts t ON t.id = COALESCE(j.transcript_id, (
+      SELECT tx.id FROM transcripts tx WHERE tx.recording_id = j.recording_id
+      ORDER BY CASE tx.source WHEN 'pebble' THEN 0 ELSE 1 END, tx.created_at ASC LIMIT 1
+    ))
     LEFT JOIN processing_actions a ON a.job_id = j.id
-    ORDER BY j.created_at DESC LIMIT ?`).all(limit).map((row) => ({
-      id: row.id,
-      recordingId: row.recording_id,
-      deviceName: row.device_name,
-      trigger: row.trigger || null,
-      transcriptSource: row.transcript_source || null,
-      status: row.status,
-      attempts: Number(row.attempts),
-      confidence: row.confidence == null ? null : Number(row.confidence),
-      proposedAction: row.proposed_action_json ? JSON.parse(row.proposed_action_json) : null,
-      action: row.action_type ? {
-        type: row.action_type,
-        status: row.action_status,
-        result: row.result_json ? JSON.parse(row.result_json) : null,
-        error: row.action_error_code ? { code: row.action_error_code, message: row.action_error_message } : null
-      } : null,
-      error: row.last_error_code ? { code: row.last_error_code, message: row.last_error_message } : null,
-      receivedAt: row.received_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
+    ORDER BY j.created_at DESC LIMIT ?`).all(limit).map((row) => {
+      const proposedAction = row.proposed_action_json ? JSON.parse(row.proposed_action_json) : null;
+      const proxyDecision = proposedAction?.proxy_decision || null;
+      return {
+        id: row.id,
+        recordingId: row.recording_id,
+        deviceName: row.device_name,
+        connectionLabel: row.connection_label || null,
+        ownerDeviceId: row.owner_device_id || row.device_id,
+        trigger: row.trigger || null,
+        transcriptId: row.transcript_id || row.listed_transcript_id || null,
+        transcriptSource: row.transcript_source || row.listed_transcript_source || null,
+        transcriptText: row.transcript_text || null,
+        recordedAt: row.recorded_at || null,
+        status: row.status,
+        attempts: Number(row.attempts),
+        configRevision: Number(row.config_revision),
+        confidence: row.confidence == null ? null : Number(row.confidence),
+        confidenceThreshold: proxyDecision?.confidence_threshold ?? null,
+        router: proposedAction?.router || null,
+        verification: proxyDecision?.verification || null,
+        proposedAction,
+        action: row.action_type ? {
+          type: row.action_type,
+          status: row.action_status,
+          arguments: row.action_arguments_json ? JSON.parse(row.action_arguments_json) : null,
+          result: row.result_json ? JSON.parse(row.result_json) : null,
+          error: row.action_error_code ? { code: row.action_error_code, message: row.action_error_message } : null
+        } : null,
+        error: row.last_error_code ? { code: row.last_error_code, message: row.last_error_message } : null,
+        receivedAt: row.received_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    });
 }
 
 export function retryProcessingJob(db, id) {

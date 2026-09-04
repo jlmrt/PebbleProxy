@@ -1,7 +1,7 @@
 services:
   pebble-proxy:
     build: .
-    image: pebble-proxy:0.1.0-test.8
+    image: pebble-proxy:0.1.0-test.9
     restart: unless-stopped
     environment:
       ROLE: all
@@ -21,7 +21,7 @@ services:
 
   needle:
     build: ./needle-sidecar
-    image: pebble-proxy-needle:0.1.0-test.8
+    image: pebble-proxy-needle:0.1.0-test.9
     restart: unless-stopped
     read_only: true
     environment:

@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.8">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.9">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -128,9 +128,9 @@
               <li class="setup-step" id="setup-step-token">
                 <div class="step-number" aria-hidden="true">2</div>
                 <div class="step-content">
-                  <div class="step-heading"><div><span class="eyebrow">Device credential</span><h3>Create a separate token</h3></div><span class="badge badge-neutral" id="setup-token-status">Required</span></div>
-                  <p>Create one token per ring, watch, or app. For Pebble Index, keep <strong>Voice webhook</strong> enabled. The token appears once and the next screen shows exactly where to paste it.</p>
-                  <button class="button button-primary" id="setup-create-token" type="button">Create device token</button>
+                  <div class="step-heading"><div><span class="eyebrow">Device access</span><h3>Add your Index or Pebble app</h3></div><span class="badge badge-neutral" id="setup-token-status">Required</span></div>
+                  <p>Choose <strong>Index 01</strong> for recording webhooks or a custom MCP server. Choose <strong>Pebble app / API client</strong> for OpenAI-compatible, speech, webhook, and MCP access. Tokens are created underneath the device.</p>
+                  <button class="button button-primary" id="setup-create-token" type="button">Add device</button>
                 </div>
               </li>
 
@@ -141,10 +141,10 @@
                   <div class="client-guide-grid">
                     <article class="client-guide-card">
                       <span class="client-type">Pebble Index / CoreApp</span>
-                      <h4>Fill in CoreApp’s webhook and header fields</h4>
-                      <div class="copy-field"><label for="setup-index-webhook-url">Index Settings → Webhook → Webhook URL</label><div><input id="setup-index-webhook-url" type="text" readonly spellcheck="false" placeholder="Complete step 1"><button type="button" class="copy-button" data-copy-target="setup-index-webhook-url" disabled>Copy</button></div></div>
+                      <h4>Configure a webhook or custom MCP server</h4>
+                      <div class="route-explanation"><strong>Use the connection-specific setup</strong><p>Create the Index device and choose a recording webhook or custom MCP connection in step 2. The one-time token screen gives you the matching URL and authorization instructions. You can copy the endpoint again later from Devices.</p><button class="button button-secondary" type="button" data-go="devices">Open Devices</button></div>
                       <div class="copy-field copy-field-secondary"><label for="setup-index-header-name">Custom header → Name</label><div><input id="setup-index-header-name" type="text" value="X-Widget-Token" readonly spellcheck="false"><button type="button" class="copy-button" data-copy-target="setup-index-header-name">Copy</button></div></div>
-                      <dl class="placement-list"><div><dt>Header name</dt><dd>Paste <code>X-Widget-Token</code> into the first custom-header field.</dd></div><div><dt>Header value</dt><dd>Paste the raw one-time <code>pp_…</code> token into the second field, without <code>Bearer</code>.</dd></div><div><dt>Send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Trigger</dt><dd>Choose the Index gesture you want, such as double-click and hold.</dd></div></dl>
+                      <dl class="placement-list"><div><dt>Webhook header</dt><dd>Paste <code>X-Widget-Token</code> into the first custom-header field and the raw <code>pp_…</code> token into the second, without <code>Bearer</code>.</dd></div><div><dt>Webhook send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Webhook gestures</dt><dd>Use one connection for both gestures, or make two connections when each gesture needs its own route.</dd></div><div><dt>Custom MCP</dt><dd>Create an Index MCP connection to get a Streamable HTTP URL and <code>Bearer</code> authorization value for an MCP Sandbox group.</dd></div></dl>
                     </article>
                     <article class="client-guide-card">
                       <span class="client-type">Pebble watch app / custom client</span>
@@ -159,9 +159,9 @@
               <li class="setup-step">
                 <div class="step-number" aria-hidden="true">4</div>
                 <div class="step-content">
-                  <div class="step-heading"><div><span class="eyebrow">Verify</span><h3>Send one test recording</h3></div></div>
-                  <p>Use CoreApp’s test button first. Pebble Proxy accepts the probe without adding it to Recordings. Then trigger the ring once; a real upload appears as <strong>Received</strong> or <strong>Ready</strong>. If it does not appear, re-check the public origin and both custom-header fields.</p>
-                  <button class="button button-secondary" type="button" data-go="recordings">Open recordings</button>
+                  <div class="step-heading"><div><span class="eyebrow">Verify</span><h3>Test the connection you created</h3></div></div>
+                  <dl class="placement-list"><div><dt>Recording webhook</dt><dd>Use the Pebble app’s test button first. Pebble Proxy accepts the probe without adding it to Recordings. Then trigger the ring once; a real upload appears as <strong>Received</strong> or <strong>Ready</strong>. If it does not, re-check the public origin and both custom-header fields.</dd></div><div><dt>Custom MCP server</dt><dd>After saving the server, wait for the Pebble app to show <strong>Pebble Proxy Notes &amp; Reminders</strong>. Assign it to a cloud MCP Sandbox group, ask Index to create a note or reminder, then check the local workspace below.</dd></div></dl>
+                  <div class="inline-actions"><button class="button button-secondary" type="button" data-go="recordings">Open recordings</button><button class="button button-secondary" type="button" data-go="organizer">Open notes &amp; reminders</button></div>
                 </div>
               </li>
             </ol>
@@ -218,10 +218,10 @@
                   </div>
                 </form>
                 <div class="copy-field">
-                  <label for="pebble-webhook-url">Pebble webhook URL</label>
+                  <label for="pebble-webhook-url">Legacy shared webhook URL</label>
                   <div><input id="pebble-webhook-url" type="text" readonly spellcheck="false" placeholder="Set the public HTTPS origin above"><button type="button" class="copy-button" id="copy-pebble-webhook-url" data-copy-target="pebble-webhook-url" disabled>Copy</button></div>
                 </div>
-                <p class="helper">Pebble Index/CoreApp: paste this into <strong>Webhook URL</strong>. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw one-time token into the second—without a <code>Bearer</code> prefix. Custom clients may instead use <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+                <p class="helper">Existing integrations may keep using this shared route. For a new Index, create a typed device and copy its connection-specific URL from <strong>Devices</strong>; this preserves the selected gesture and makes each connection independently revocable.</p>
                 <div class="copy-field copy-field-secondary">
                   <label for="cloudflare-service-url">Published application Service URL (advanced/direct container)</label>
                   <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" placeholder="Loading from Pebble Proxy"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url" disabled>Copy</button></div>
@@ -246,14 +246,14 @@
 
           <section class="page" id="page-devices" data-page="devices" hidden>
             <div class="section-toolbar">
-              <div><h2>Device access</h2><p>Issue a separate scoped token for every watch or Pebble app.</p></div>
-              <button class="button button-primary" id="open-device-dialog" type="button">Create device token</button>
+              <div><h2>Devices</h2><p>Group each Index or Pebble app with its own connections and tokens.</p></div>
+              <button class="button button-primary" id="open-device-dialog" type="button">Add device</button>
             </div>
             <article class="info-strip">
               <span aria-hidden="true">i</span>
               <p>Tokens are shown once. Pebble Proxy stores only a secure hash, so a lost token must be revoked and replaced.</p>
             </article>
-            <div class="panel table-panel">
+            <div class="panel table-panel device-groups-panel">
               <div class="table-toolbar">
                 <label class="search-field"><span class="sr-only">Search devices</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 20-5.2-5.2a7 7 0 1 0-1.4 1.4L20 21l1-1ZM5 10a5 5 0 1 1 10 0 5 5 0 0 1-10 0Z"/></svg><input id="device-search" type="search" placeholder="Search devices"></label>
                 <span class="muted" id="device-total"></span>
@@ -374,6 +374,7 @@
               <span aria-hidden="true">N</span>
               <p>Needle runs in an isolated local container with telemetry and runtime downloads disabled. It can propose one note, reminder, or agent forward. Pebble Proxy validates the proposal and performs the action.</p>
             </article>
+            <article class="info-strip"><span aria-hidden="true">i</span><p>Reminders are stored in Pebble Proxy’s local organizer. This build does not create a native phone reminder or send a phone notification.</p></article>
             <div class="content-grid settings-grid">
               <form class="panel settings-form" id="processing-form">
                 <div class="panel-header"><div><span class="eyebrow">Local intent router</span><h3>Needle transcript processing</h3></div><label class="switch"><input type="checkbox" name="enabled" id="processing-enabled"><span></span><b>Enabled</b></label></div>
@@ -421,12 +422,40 @@
 
     <dialog class="modal" id="device-dialog">
       <form method="dialog" class="modal-card" id="device-form">
-        <div class="modal-header"><div><span class="eyebrow">New credential</span><h2>Create device token</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
-        <p class="modal-intro">Give every watch or app its own token so access can be limited and revoked independently.</p>
+        <div class="modal-header"><div><span class="eyebrow">New device</span><h2>Add a device</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
+        <p class="modal-intro">Choose what connects so Pebble Proxy only shows capabilities that device can actually use.</p>
+        <div class="preset-picker device-type-picker" role="radiogroup" aria-label="Device type">
+          <label><input type="radio" name="deviceType" value="index" checked><span><b>Index 01</b><small>Webhooks and custom MCP</small></span></label>
+          <label><input type="radio" name="deviceType" value="pebble"><span><b>Pebble app / other client</b><small>AI, speech, MCP, or webhook</small></span></label>
+        </div>
         <label class="field"><span>Device name</span><input name="name" required maxlength="80" placeholder="My Pebble Index" autocomplete="off"></label>
-        <fieldset class="scope-field"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="tts:speech" checked><span><strong>Spoken audio</strong><small>Generate audio through the private Kokoro app</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
+        <p class="type-help" id="device-type-help">Index supports recording webhooks and custom MCP servers. It does not use the OpenAI-compatible endpoint.</p>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Add device</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="connection-dialog">
+      <form method="dialog" class="modal-card" id="connection-form">
+        <div class="modal-header"><div><span class="eyebrow">Device connection</span><h2 id="connection-dialog-title">Create connection</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
+        <p class="modal-intro" id="connection-dialog-intro">Create a separately revocable token for this device.</p>
+        <input name="deviceId" type="hidden"><input name="deviceType" type="hidden">
+        <label class="field"><span>Connection name</span><input name="label" maxlength="80" placeholder="Primary connection" autocomplete="off"></label>
+        <div id="index-connection-fields">
+          <div class="preset-picker connection-type-picker" role="radiogroup" aria-label="Index connection type">
+            <label><input type="radio" name="connectionType" value="webhook" checked><span><b>Recording webhook</b><small>Receive text and audio</small></span></label>
+            <label><input type="radio" name="connectionType" value="mcp"><span><b>Custom MCP server</b><small>Expose approved tools</small></span></label>
+          </div>
+          <div id="index-webhook-fields">
+            <label class="field"><span>Index gesture</span><select name="indexTrigger"><option value="all">Hold & Talk and Double Click & Hold</option><option value="single-click-hold">Ring Button Hold & Talk</option><option value="double-click-hold">Double Click & Hold</option></select><small>Use one shared connection for both gestures, or create one connection per gesture when you want independent webhook routes.</small></label>
+            <article class="info-strip compact-info"><span aria-hidden="true">i</span><p>The next screen gives you the exact webhook URL, header name, and one-time token to paste into the Pebble phone app.</p></article>
+          </div>
+          <div id="index-mcp-fields" hidden>
+            <article class="info-strip compact-info"><span aria-hidden="true">i</span><p>Pebble Proxy provides a Streamable HTTP MCP server with device-private note and reminder tools. Add it to a cloud MCP Sandbox group in the Pebble app; the next screen gives you its URL and <code>Authorization</code> value.</p></article>
+          </div>
+        </div>
+        <fieldset class="scope-field" id="pebble-connection-scopes"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="tts:speech" checked><span><strong>Spoken audio</strong><small>Generate audio through the private Kokoro app</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
         <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expires</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Create token</button></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Create connection</button></div>
       </form>
     </dialog>
 
@@ -436,22 +465,20 @@
         <h2>Token created</h2>
         <p class="modal-intro">Copy it now. This secret will not be displayed again.</p>
         <div class="token-display"><textarea id="new-device-token" rows="3" readonly spellcheck="false" aria-label="One-time device token"></textarea><button class="copy-button" id="copy-device-token" type="button" data-copy-target="new-device-token">Copy</button></div>
+        <p class="token-context" id="token-context"></p>
         <div class="token-webhook" id="token-webhook" hidden>
           <div class="copy-field">
             <label for="new-device-webhook-url">Pebble webhook URL</label>
             <div><input id="new-device-webhook-url" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-webhook-url">Copy</button></div>
           </div>
           <div class="token-placement">
-            <strong>Pebble Index / CoreApp</strong>
-            <p>Paste the URL above into <code>Index Settings → Webhook → Webhook URL</code>. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw token into the second. Do not add <code>Bearer</code>.</p>
-            <div class="copy-field copy-field-secondary"><label for="new-device-header-name">Custom header → Name</label><div><input id="new-device-header-name" type="text" value="X-Widget-Token" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-name">Copy</button></div></div>
+            <strong id="token-webhook-heading">Pebble Index / CoreApp</strong>
+            <p id="token-index-instruction">Paste the URL above into the matching Index gesture’s Webhook settings. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw token into the second. Do not add <code>Bearer</code>.</p>
+            <div class="copy-field copy-field-secondary"><label for="new-device-header-name">Custom header → Name</label><div><input id="new-device-header-name" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-name">Copy</button></div></div>
             <div class="copy-field copy-field-secondary"><label for="new-device-header-value">Custom header → Value</label><div><input id="new-device-header-value" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-value">Copy</button></div></div>
           </div>
-          <div class="token-placement">
-            <strong>Custom Pebble watch app or API client</strong>
-            <p>Use <code>Authorization</code> as the header name and <code>Bearer &lt;token above&gt;</code> as its value. Use your public origin plus <code>/v1</code> as the OpenAI-compatible base URL.</p>
-          </div>
         </div>
+        <div class="token-placement" id="token-api-instruction" hidden><strong id="token-api-heading">Pebble watch app or API client</strong><p id="token-api-copy">Use <code>Authorization</code> as the header name and the exact value below. Only the selected capabilities are enabled:</p><div class="copy-field copy-field-secondary"><label for="new-device-authorization-value">Authorization value</label><div><input id="new-device-authorization-value" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-authorization-value">Copy</button></div></div><ul class="token-api-endpoints" id="token-api-endpoints"></ul></div>
         <label class="confirm-check"><input type="checkbox" id="token-saved"><span>I saved this token somewhere secure.</span></label>
         <button class="button button-primary button-block" id="close-token-dialog" type="button" disabled>Done</button>
       </div>
@@ -459,7 +486,7 @@
 
     <dialog class="modal" id="backend-dialog">
       <form method="dialog" class="modal-card modal-card-wide" id="backend-form">
-        <div class="modal-header"><div><span class="eyebrow">Private connection</span><h2>Add AI backend</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Private connection</span><h2>Add AI backend</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
         <div class="preset-picker" role="radiogroup" aria-label="Backend preset">
           <label><input type="radio" name="preset" value="openclaw" checked><span><b>OpenClaw</b><small>Umbrel preset</small></span></label>
           <label><input type="radio" name="preset" value="hermes"><span><b>Hermes</b><small>Umbrel preset</small></span></label>
@@ -479,17 +506,17 @@
           <p>Off by default. Enable only for a trusted Internet provider; private and special network addresses remain blocked.</p>
         </div>
         <label class="switch standalone-switch"><input type="checkbox" name="enabled" checked><span></span><b>Enable after saving</b></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save backend</button></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Save backend</button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="alias-dialog">
       <form method="dialog" class="modal-card" id="alias-form">
-        <div class="modal-header"><div><span class="eyebrow">Public model</span><h2>Add model alias</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Public model</span><h2>Add model alias</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
         <label class="field"><span>Public alias</span><input name="alias" required pattern="[a-zA-Z0-9._-]+" placeholder="pebble-assistant"><small>This is the only model name devices will see.</small></label>
         <label class="field"><span>Backend</span><select name="backendId" id="alias-backend" required></select></label>
         <label class="field"><span>Downstream model or agent</span><input name="downstreamModel" required placeholder="openclaw/pebble"></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Add alias</button></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Add alias</button></div>
       </form>
     </dialog>
 
@@ -499,26 +526,26 @@
 
     <dialog class="modal" id="note-dialog">
       <form method="dialog" class="modal-card" id="note-form">
-        <div class="modal-header"><div><span class="eyebrow">Private note</span><h2>Add note</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
-        <label class="field"><span>Device</span><select name="deviceId" id="note-device" required><option value="" disabled selected>Select an active device</option></select><small>The note belongs to this device’s isolated MCP workspace.</small></label>
+        <div class="modal-header"><div><span class="eyebrow">Private note</span><h2>Add note</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
+        <label class="field"><span>Connection</span><select name="deviceId" id="note-device" required><option value="" disabled selected>Select an active connection</option></select><small>The note belongs to the parent device and is available through its active connections.</small></label>
         <label class="field"><span>Title</span><input name="title" maxlength="120" required></label>
         <label class="field"><span>Note</span><textarea name="body" rows="6" maxlength="5000" required></textarea></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save note</button></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Save note</button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="reminder-dialog">
       <form method="dialog" class="modal-card" id="reminder-form">
-        <div class="modal-header"><div><span class="eyebrow">Private reminder</span><h2>Add reminder</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
-        <label class="field"><span>Device</span><select name="deviceId" id="reminder-device" required><option value="" disabled selected>Select an active device</option></select><small>The reminder is isolated to this device.</small></label>
+        <div class="modal-header"><div><span class="eyebrow">Private reminder</span><h2>Add reminder</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
+        <label class="field"><span>Connection</span><select name="deviceId" id="reminder-device" required><option value="" disabled selected>Select an active connection</option></select><small>The reminder belongs to the parent device and is available through its active connections.</small></label>
         <label class="field"><span>Reminder</span><input name="title" maxlength="180" required></label>
         <label class="field"><span>Due date and time</span><input name="dueAt" type="datetime-local" required></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save reminder</button></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Save reminder</button></div>
       </form>
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.8" defer></script>
-    <script src="/app.js?v=0.1.0-test.8" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.9" defer></script>
+    <script src="/app.js?v=0.1.0-test.9" defer></script>
   </body>
 </html>
