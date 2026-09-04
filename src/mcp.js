@@ -98,7 +98,7 @@ export function registerMcpRoutes(router, { db, config, authenticate, limiter })
         rpcResult = {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'Pebble Proxy Notes & Reminders', version: '0.1.0-test.7' },
+          serverInfo: { name: 'Pebble Proxy Notes & Reminders', version: '0.1.0-test.8' },
           instructions: 'Tools are private to the authenticated Pebble device. Deletion tools require confirm=true after explicit user confirmation.'
         };
       } else if (payload.method === 'ping') {

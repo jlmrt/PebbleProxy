@@ -313,7 +313,7 @@ function overview(db, config) {
   const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0-test.7',
+    version: '0.1.0-test.8',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,

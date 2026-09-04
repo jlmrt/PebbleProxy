@@ -2,7 +2,7 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.7"
+version: "0.1.0-test.8"
 tagline: A private voice and AI gateway for Pebble apps
 icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
@@ -23,7 +23,5 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Adds opt-in local Needle transcript processing for creating notes, creating reminders,
-  or forwarding the original transcript to a configured private agent. CoreApp test events
-  are now accepted without being stored, Index trigger metadata is retained, and the setup
-  guide shows the custom header name and value fields.
+  Fixes Cancel and close controls being blocked by unfinished required fields in add dialogs,
+  and increases text sizes throughout the admin interface for better readability.

@@ -1,6 +1,6 @@
 {
   "name": "pebble-proxy",
-  "version": "0.1.0-test.7",
+  "version": "0.1.0-test.8",
   "private": true,
   "description": "A privacy-first Pebble gateway for Umbrel",
   "type": "module",

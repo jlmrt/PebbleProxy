@@ -52,7 +52,7 @@ assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.7["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.8["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -77,6 +77,14 @@ for (const [name, source] of [['web/index.html', html], ['web/app.js', browserSc
 }
 assert.match(browserStyles, /font-size:\s*max\(1rem, 16px\)/,
   'Editable controls need a 16px iOS Safari font-size floor');
+const cancelControls = html.match(/<button\b[^>]*\bvalue="cancel"[^>]*>/g) || [];
+assert.ok(cancelControls.length >= 2, 'Dialog cancel controls are required');
+for (const control of cancelControls) {
+  assert.match(control, /\bformnovalidate\b/, 'Dialog cancel controls must bypass required-field validation');
+}
+const fixedFontSizes = [...browserStyles.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)]
+  .map((match) => Number(match[1]));
+assert.ok(Math.min(...fixedFontSizes) >= 11, 'Fixed text must remain at least 11px');
 
 function exportedApiAddress(exportsAppId) {
   const result = spawnSync('bash', ['-c', 'set -u; source "$1"; printf "%s\\n%s\\n" "$APP_PEBBLE_PROXY_API_HOST" "$APP_PEBBLE_PROXY_API_URL"', 'bash', path.join(root, 'exports.sh')], {

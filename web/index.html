@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.7">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.8">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -421,12 +421,12 @@
 
     <dialog class="modal" id="device-dialog">
       <form method="dialog" class="modal-card" id="device-form">
-        <div class="modal-header"><div><span class="eyebrow">New credential</span><h2>Create device token</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">New credential</span><h2>Create device token</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
         <p class="modal-intro">Give every watch or app its own token so access can be limited and revoked independently.</p>
         <label class="field"><span>Device name</span><input name="name" required maxlength="80" placeholder="My Pebble Index" autocomplete="off"></label>
         <fieldset class="scope-field"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="tts:speech" checked><span><strong>Spoken audio</strong><small>Generate audio through the private Kokoro app</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
         <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expires</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Create token</button></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Create token</button></div>
       </form>
     </dialog>
 
@@ -459,7 +459,7 @@
 
     <dialog class="modal" id="backend-dialog">
       <form method="dialog" class="modal-card modal-card-wide" id="backend-form">
-        <div class="modal-header"><div><span class="eyebrow">Private connection</span><h2>Add AI backend</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Private connection</span><h2>Add AI backend</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
         <div class="preset-picker" role="radiogroup" aria-label="Backend preset">
           <label><input type="radio" name="preset" value="openclaw" checked><span><b>OpenClaw</b><small>Umbrel preset</small></span></label>
           <label><input type="radio" name="preset" value="hermes"><span><b>Hermes</b><small>Umbrel preset</small></span></label>
@@ -479,17 +479,17 @@
           <p>Off by default. Enable only for a trusted Internet provider; private and special network addresses remain blocked.</p>
         </div>
         <label class="switch standalone-switch"><input type="checkbox" name="enabled" checked><span></span><b>Enable after saving</b></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save backend</button></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save backend</button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="alias-dialog">
       <form method="dialog" class="modal-card" id="alias-form">
-        <div class="modal-header"><div><span class="eyebrow">Public model</span><h2>Add model alias</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Public model</span><h2>Add model alias</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
         <label class="field"><span>Public alias</span><input name="alias" required pattern="[a-zA-Z0-9._-]+" placeholder="pebble-assistant"><small>This is the only model name devices will see.</small></label>
         <label class="field"><span>Backend</span><select name="backendId" id="alias-backend" required></select></label>
         <label class="field"><span>Downstream model or agent</span><input name="downstreamModel" required placeholder="openclaw/pebble"></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Add alias</button></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Add alias</button></div>
       </form>
     </dialog>
 
@@ -499,26 +499,26 @@
 
     <dialog class="modal" id="note-dialog">
       <form method="dialog" class="modal-card" id="note-form">
-        <div class="modal-header"><div><span class="eyebrow">Private note</span><h2>Add note</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Private note</span><h2>Add note</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
         <label class="field"><span>Device</span><select name="deviceId" id="note-device" required><option value="" disabled selected>Select an active device</option></select><small>The note belongs to this device’s isolated MCP workspace.</small></label>
         <label class="field"><span>Title</span><input name="title" maxlength="120" required></label>
         <label class="field"><span>Note</span><textarea name="body" rows="6" maxlength="5000" required></textarea></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save note</button></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save note</button></div>
       </form>
     </dialog>
 
     <dialog class="modal" id="reminder-dialog">
       <form method="dialog" class="modal-card" id="reminder-form">
-        <div class="modal-header"><div><span class="eyebrow">Private reminder</span><h2>Add reminder</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit">×</button></div>
+        <div class="modal-header"><div><span class="eyebrow">Private reminder</span><h2>Add reminder</h2></div><button class="icon-button modal-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button></div>
         <label class="field"><span>Device</span><select name="deviceId" id="reminder-device" required><option value="" disabled selected>Select an active device</option></select><small>The reminder is isolated to this device.</small></label>
         <label class="field"><span>Reminder</span><input name="title" maxlength="180" required></label>
         <label class="field"><span>Due date and time</span><input name="dueAt" type="datetime-local" required></label>
-        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit">Cancel</button><button class="button button-primary" value="default" type="submit">Save reminder</button></div>
+        <div class="modal-actions"><button class="button button-secondary" value="cancel" type="submit" formnovalidate>Cancel</button><button class="button button-primary" value="default" type="submit">Save reminder</button></div>
       </form>
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.7" defer></script>
-    <script src="/app.js?v=0.1.0-test.7" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.8" defer></script>
+    <script src="/app.js?v=0.1.0-test.8" defer></script>
   </body>
 </html>
