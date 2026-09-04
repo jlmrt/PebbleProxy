@@ -450,7 +450,7 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
       const payload = parseIndexWebhook(req, buffer);
       const configuredTrigger = device.indexTrigger || device.index_trigger || null;
       if (!payload.test && payload.trigger && configuredTrigger && configuredTrigger !== 'all' && configuredTrigger !== payload.trigger) {
-        throw new HttpError(409, 'index_trigger_mismatch', 'This webhook connection is assigned to a different Index gesture');
+        throw new HttpError(409, 'index_trigger_mismatch', 'This webhook connection is assigned to a different Ring Button option');
       }
       if (!payload.test && !payload.trigger && configuredTrigger && configuredTrigger !== 'all') {
         payload.trigger = configuredTrigger;

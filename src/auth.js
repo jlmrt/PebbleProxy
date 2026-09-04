@@ -6,6 +6,8 @@ export const DEVICE_SCOPES = Object.freeze(['ai:chat', 'webhook:write', 'tts:spe
 export const CLIENT_DEVICE_TYPES = Object.freeze(['index', 'pebble', 'other']);
 export const INDEX_TRIGGERS = Object.freeze(['single-click-hold', 'double-click-hold', 'all']);
 export const INDEX_CONNECTION_TYPES = Object.freeze(['webhook', 'mcp']);
+export const INDEX_MCP_TOPICS = Object.freeze(['notes', 'reminders', 'calendar', 'messaging']);
+export const AVAILABLE_INDEX_MCP_TOPICS = Object.freeze(['notes', 'reminders']);
 
 function compatibilityToken(req) {
   const candidates = [bearerToken(req)];
@@ -47,6 +49,7 @@ function publicDevice(row) {
     label: row.connection_label || row.name,
     connectionType: derivedConnectionType(row.owner_device_type, scopes),
     indexTrigger: row.index_trigger || null,
+    mcpTopic: row.mcp_topic || null,
     tokenPrefix: row.secret_prefix,
     scopes,
     aliases: parseList(row.aliases_json),
@@ -104,15 +107,26 @@ function indexConnectionType(value) {
   return type;
 }
 
-function connectionLabel(value, parent, trigger, connectionType) {
+function indexMcpTopic(value) {
+  const topic = String(value || 'notes').trim().toLowerCase();
+  if (!INDEX_MCP_TOPICS.includes(topic)) {
+    throw new HttpError(400, 'invalid_mcp_topic', 'Index MCP topic must be notes, reminders, calendar, or messaging');
+  }
+  if (!AVAILABLE_INDEX_MCP_TOPICS.includes(topic)) {
+    throw new HttpError(400, 'mcp_topic_unavailable', `${topic[0].toUpperCase()}${topic.slice(1)} requires a configured provider`);
+  }
+  return topic;
+}
+
+function connectionLabel(value, parent, trigger, connectionType, mcpTopic) {
   const explicit = String(value || '').trim();
   if (explicit.length > 100) throw new HttpError(400, 'invalid_connection_label', 'Connection label must be at most 100 characters');
   if (explicit) return explicit;
   if (parent.type !== 'index') return 'Default connection';
-  if (connectionType === 'mcp') return 'Custom MCP server';
-  if (trigger === 'single-click-hold') return 'Ring Button Hold & Talk';
-  if (trigger === 'double-click-hold') return 'Double Click & Hold';
-  return 'All Index gestures';
+  if (connectionType === 'mcp') return mcpTopic === 'reminders' ? 'Reminders' : 'Notes';
+  if (trigger === 'single-click-hold') return 'Hold & Talk';
+  if (trigger === 'double-click-hold') return 'Double click & hold';
+  return 'Both';
 }
 
 function scopesFor(input, parentType, connectionType) {
@@ -179,10 +193,15 @@ function insertDeviceConnection(db, cryptoService, parent, input = {}) {
     throw new HttpError(400, 'invalid_index_trigger', 'Only Index devices can assign an Index trigger');
   }
   if (connectionType === 'mcp' && triggerInput != null && String(triggerInput).trim()) {
-    throw new HttpError(400, 'invalid_index_trigger', 'Index MCP servers are assigned to gestures in the Pebble app, not on the MCP connection');
+    throw new HttpError(400, 'invalid_index_trigger', 'Index MCP servers are assigned in the Pebble app, not on the MCP connection');
+  }
+  const topicInput = input.mcpTopic ?? input.mcp_topic;
+  if (connectionType !== 'mcp' && topicInput != null && String(topicInput).trim()) {
+    throw new HttpError(400, 'invalid_mcp_topic', 'Only Index MCP connections can select an MCP topic');
   }
   const trigger = parent.type === 'index' && connectionType === 'webhook' ? indexTrigger(triggerInput || 'all') : null;
-  const label = connectionLabel(input.label ?? input.connectionLabel, parent, trigger, connectionType);
+  const mcpTopic = parent.type === 'index' && connectionType === 'mcp' ? indexMcpTopic(topicInput) : null;
+  const label = connectionLabel(input.label ?? input.connectionLabel, parent, trigger, connectionType, mcpTopic);
   const scopes = scopesFor(input, parent.type, connectionType);
   const aliases = aliasesFor(input);
   const requestsPerMinute = boundedInteger(input.requestsPerMinute, 30, 1, 600);
@@ -191,14 +210,15 @@ function insertDeviceConnection(db, cryptoService, parent, input = {}) {
   const credential = cryptoService.createDeviceToken();
   const now = nowIso();
   db.prepare(`INSERT INTO device_credentials
-    (id, name, owner_device_id, connection_label, index_trigger, secret_hash, secret_prefix,
+    (id, name, owner_device_id, connection_label, index_trigger, mcp_topic, secret_hash, secret_prefix,
      scopes_json, aliases_json, requests_per_minute, max_concurrency, expires_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     credential.id,
     parent.name,
     parent.id,
     label,
     trigger,
+    mcpTopic,
     credential.hash,
     credential.prefix,
     JSON.stringify(scopes),
@@ -252,6 +272,7 @@ export function createAuthenticator({ db, cryptoService }) {
       connectionLabel: row.connection_label || row.name,
       connectionType: derivedConnectionType(row.owner_device_type, scopes),
       indexTrigger: row.index_trigger || null,
+      mcpTopic: row.mcp_topic || null,
       scopes,
       aliases: parseList(row.aliases_json)
     };

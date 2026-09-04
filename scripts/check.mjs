@@ -52,7 +52,7 @@ assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.13["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.14["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -77,7 +77,7 @@ assert.match(html, /id="new-device-authorization-value"/);
 assert.match(html, /id="connection-form"/);
 assert.match(browserScript, /api\("\/device-groups"\)/);
 assert.match(browserScript, /body\.connectionType = plainText\(data\.get\("connectionType"\), "webhook"\)/);
-assert.match(browserScript, /Pebble Index custom MCP server/);
+assert.match(browserScript, /Pebble Index \$\{mcpTopicLabel\(mcpTopic\)\} MCP server/);
 assert.match(browserScript, /\["proxy_decision"\]/);
 assert.match(browserScript, /Raw router response/);
 assert.match(html, /id="setup-cloudflare-target"[^>]*placeholder="Loading from Pebble Proxy"[^>]*>[\s\S]*?data-copy-target="setup-cloudflare-target" disabled/);

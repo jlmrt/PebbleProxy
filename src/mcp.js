@@ -40,8 +40,8 @@ const TOOLS = [
   },
   {
     name: 'reminders_create',
-    title: 'Create local reminder',
-    description: 'Create a reminder entry in the authenticated device workspace. This stores the reminder in Pebble Proxy; it does not schedule a phone notification.',
+    title: 'Create reminder',
+    description: 'Create a reminder for the authenticated Pebble device.',
     inputSchema: {
       type: 'object', additionalProperties: false, required: ['title'],
       properties: { title: { type: 'string', minLength: 1, maxLength: 200 }, due_at: { type: ['string', 'null'], description: 'ISO 8601 date-time' }, timezone: { type: ['string', 'null'], maxLength: 80 } }
@@ -70,6 +70,29 @@ const TOOLS = [
     annotations: { destructiveHint: true }
   }
 ];
+
+function mcpProfile(device) {
+  const topic = device.mcpTopic || device.mcp_topic || null;
+  if (topic === 'notes') {
+    return {
+      name: 'Pebble Proxy Notes',
+      tools: TOOLS.filter((tool) => tool.name.startsWith('notes_')),
+      instructions: 'Create, find, update, and delete notes in the private workspace shared by this Index device’s connections.'
+    };
+  }
+  if (topic === 'reminders') {
+    return {
+      name: 'Pebble Proxy Reminders',
+      tools: TOOLS.filter((tool) => tool.name.startsWith('reminders_')),
+      instructions: 'Create, find, complete, and delete reminders in the private workspace shared by this Index device’s connections.'
+    };
+  }
+  return {
+    name: 'Pebble Proxy Notes & Reminders',
+    tools: TOOLS,
+    instructions: 'Tools use the private workspace shared by this device’s connections.'
+  };
+}
 
 function object(value, name = 'arguments') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'invalid_params', `${name} must be an object`);
@@ -116,6 +139,7 @@ export function registerMcpRoutes(router, { db, config, authenticate, limiter })
   router.add('POST', '/mcp', async (req, res) => {
     validateOrigin(req, db, config);
     const device = await authenticate(req, 'mcp:invoke');
+    const profile = mcpProfile(device);
     const lease = limiter.acquire(device);
     try {
       const payload = await readJson(req, config.maxJsonBytes);
@@ -131,17 +155,20 @@ export function registerMcpRoutes(router, { db, config, authenticate, limiter })
         rpcResult = {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'Pebble Proxy Notes & Reminders', version: '0.1.0-test.13' },
-          instructions: 'Tools use the private workspace shared by this device’s connections. Reminder tools store local Pebble Proxy entries and do not schedule phone notifications. Deletion tools require confirm=true after explicit user confirmation.'
+          serverInfo: { name: profile.name, version: '0.1.0-test.14' },
+          instructions: `${profile.instructions} Deletion tools require confirm=true after explicit user confirmation.`
         };
       } else if (payload.method === 'ping') {
         rpcResult = {};
       } else if (payload.method === 'tools/list') {
-        rpcResult = { tools: TOOLS };
+        rpcResult = { tools: profile.tools };
       } else if (payload.method === 'tools/call') {
         const params = object(payload.params, 'params');
         if (typeof params.name !== 'string') throw new HttpError(400, 'invalid_params', 'Tool name is required');
         try {
+          if (!profile.tools.some((tool) => tool.name === params.name)) {
+            throw new HttpError(400, 'tool_not_found', 'Tool is not available on this topic server');
+          }
           rpcResult = executeMcpTool(db, device, params.name, params.arguments);
         } catch (error) {
           if (!(error instanceof HttpError)) throw error;

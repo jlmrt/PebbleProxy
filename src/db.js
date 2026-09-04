@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS device_credentials (
   owner_device_id TEXT REFERENCES client_devices(id),
   connection_label TEXT NOT NULL DEFAULT '',
   index_trigger TEXT CHECK(index_trigger IS NULL OR index_trigger IN ('single-click-hold','double-click-hold','all')),
+  mcp_topic TEXT CHECK(mcp_topic IS NULL OR mcp_topic IN ('notes','reminders','calendar','messaging')),
   secret_hash TEXT NOT NULL,
   secret_prefix TEXT NOT NULL,
   scopes_json TEXT NOT NULL,
@@ -311,6 +312,7 @@ export function createDatabase(databasePath) {
   ensureColumn(db, 'device_credentials', 'owner_device_id', 'TEXT REFERENCES client_devices(id)');
   ensureColumn(db, 'device_credentials', 'connection_label', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'device_credentials', 'index_trigger', "TEXT CHECK(index_trigger IS NULL OR index_trigger IN ('single-click-hold','double-click-hold','all'))");
+  ensureColumn(db, 'device_credentials', 'mcp_topic', 'TEXT');
   ensureColumn(db, 'device_credentials', 'deleted_at', 'TEXT');
   ensureColumn(db, 'recordings', 'trigger', 'TEXT');
   ensureColumn(db, 'reminders', 'due_text', 'TEXT');

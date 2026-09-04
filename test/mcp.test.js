@@ -117,12 +117,39 @@ test('MCP organizer data is shared by sibling connections but isolated from othe
     label: 'Hold & Talk', connectionType: 'webhook', indexTrigger: 'single-click-hold'
   });
   const sibling = createDeviceConnection(value.db, value.cryptoService, parent.id, {
-    label: 'Organizer', connectionType: 'mcp'
+    connectionType: 'mcp', mcpTopic: 'notes'
+  });
+  const siblingReminders = createDeviceConnection(value.db, value.cryptoService, parent.id, {
+    connectionType: 'mcp', mcpTopic: 'reminders'
   });
   const otherParent = createClientDevice(value.db, { name: 'Other Index', type: 'index' });
   const outsider = createDeviceConnection(value.db, value.cryptoService, otherParent.id, {
-    label: 'Other organizer', connectionType: 'mcp'
+    connectionType: 'mcp', mcpTopic: 'notes'
   });
+  const outsiderReminders = createDeviceConnection(value.db, value.cryptoService, otherParent.id, {
+    connectionType: 'mcp', mcpTopic: 'reminders'
+  });
+
+  const notesInitialized = await rpc(value.dispatch, sibling.token, 6, 'initialize', {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' }
+  });
+  assert.equal(notesInitialized.body.result.serverInfo.name, 'Pebble Proxy Notes');
+  const remindersInitialized = await rpc(value.dispatch, siblingReminders.token, 7, 'initialize', {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' }
+  });
+  assert.equal(remindersInitialized.body.result.serverInfo.name, 'Pebble Proxy Reminders');
+  const notesTools = await rpc(value.dispatch, sibling.token, 8, 'tools/list');
+  assert.deepEqual(notesTools.body.result.tools.map((tool) => tool.name), [
+    'notes_create', 'notes_list', 'notes_update', 'notes_delete'
+  ]);
+  const remindersTools = await rpc(value.dispatch, siblingReminders.token, 9, 'tools/list');
+  assert.deepEqual(remindersTools.body.result.tools.map((tool) => tool.name), [
+    'reminders_create', 'reminders_list', 'reminders_complete', 'reminders_delete'
+  ]);
+  const unavailableTool = await rpc(value.dispatch, sibling.token, 10, 'tools/call', {
+    name: 'reminders_list', arguments: {}
+  });
+  assert.equal(unavailableTool.body.result.isError, true);
 
   const createdNote = createNote(value.db, webhook.connection.id, { title: 'Shared plan', body: 'First draft' });
   const noteId = createdNote.id;
@@ -160,28 +187,28 @@ test('MCP organizer data is shared by sibling connections but isolated from othe
   const reminderId = createdReminder.id;
   assert.equal(value.db.prepare('SELECT device_id FROM reminders WHERE id = ?').get(reminderId).device_id, webhook.connection.id);
 
-  const siblingReminders = await rpc(value.dispatch, sibling.token, 17, 'tools/call', {
+  const sharedReminders = await rpc(value.dispatch, siblingReminders.token, 17, 'tools/call', {
     name: 'reminders_list', arguments: {}
   });
-  assert.deepEqual(siblingReminders.body.result.structuredContent.reminders.map((reminder) => reminder.id), [reminderId]);
-  const outsiderReminders = await rpc(value.dispatch, outsider.token, 18, 'tools/call', {
+  assert.deepEqual(sharedReminders.body.result.structuredContent.reminders.map((reminder) => reminder.id), [reminderId]);
+  const isolatedReminders = await rpc(value.dispatch, outsiderReminders.token, 18, 'tools/call', {
     name: 'reminders_list', arguments: {}
   });
-  assert.equal(outsiderReminders.body.result.structuredContent.reminders.length, 0);
+  assert.equal(isolatedReminders.body.result.structuredContent.reminders.length, 0);
 
-  const outsiderComplete = await rpc(value.dispatch, outsider.token, 19, 'tools/call', {
+  const outsiderComplete = await rpc(value.dispatch, outsiderReminders.token, 19, 'tools/call', {
     name: 'reminders_complete', arguments: { id: reminderId }
   });
   assert.equal(outsiderComplete.body.result.isError, true);
   assert.equal(value.db.prepare('SELECT completed_at FROM reminders WHERE id = ?').get(reminderId).completed_at, null);
 
-  const siblingComplete = await rpc(value.dispatch, sibling.token, 20, 'tools/call', {
+  const siblingComplete = await rpc(value.dispatch, siblingReminders.token, 20, 'tools/call', {
     name: 'reminders_complete', arguments: { id: reminderId }
   });
   assert.equal(siblingComplete.body.result.structuredContent.id, reminderId);
   assert.ok(value.db.prepare('SELECT completed_at FROM reminders WHERE id = ?').get(reminderId).completed_at);
 
-  const outsiderReminderDelete = await rpc(value.dispatch, outsider.token, 21, 'tools/call', {
+  const outsiderReminderDelete = await rpc(value.dispatch, outsiderReminders.token, 21, 'tools/call', {
     name: 'reminders_delete', arguments: { id: reminderId, confirm: true }
   });
   assert.equal(outsiderReminderDelete.body.result.isError, true);
@@ -191,7 +218,7 @@ test('MCP organizer data is shared by sibling connections but isolated from othe
     name: 'notes_delete', arguments: { id: noteId, confirm: true }
   });
   assert.equal(siblingNoteDelete.body.result.structuredContent.deleted, true);
-  const siblingReminderDelete = await rpc(value.dispatch, sibling.token, 23, 'tools/call', {
+  const siblingReminderDelete = await rpc(value.dispatch, siblingReminders.token, 23, 'tools/call', {
     name: 'reminders_delete', arguments: { id: reminderId, confirm: true }
   });
   assert.equal(siblingReminderDelete.body.result.structuredContent.deleted, true);

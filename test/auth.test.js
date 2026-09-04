@@ -89,7 +89,7 @@ test('typed devices own independently scoped child connections', async (t) => {
   });
   assert.deepEqual(hold.connection.scopes, ['webhook:write']);
   assert.equal(hold.connection.connectionType, 'webhook');
-  assert.equal(hold.connection.label, 'Ring Button Hold & Talk');
+  assert.equal(hold.connection.label, 'Hold & Talk');
   assert.equal(hold.connection.indexTrigger, 'single-click-hold');
   assert.equal(hold.connection.webhookPath, `/webhooks/index/${hold.connection.id}`);
   assert.equal(answers.connection.ownerDeviceId, index.id);
@@ -97,9 +97,11 @@ test('typed devices own independently scoped child connections', async (t) => {
   assert.deepEqual(allGestures.connection.scopes, ['webhook:write']);
   assert.equal(allGestures.connection.indexTrigger, 'all');
   const mcp = createDeviceConnection(value.db, value.cryptoService, index.id, {
-    connectionType: 'mcp', label: 'Proxy tools'
+    connectionType: 'mcp', mcpTopic: 'notes'
   });
   assert.equal(mcp.connection.connectionType, 'mcp');
+  assert.equal(mcp.connection.label, 'Notes');
+  assert.equal(mcp.connection.mcpTopic, 'notes');
   assert.deepEqual(mcp.connection.scopes, ['mcp:invoke']);
   assert.equal(mcp.connection.indexTrigger, null);
   assert.equal(mcp.connection.webhookPath, null);
@@ -112,6 +114,16 @@ test('typed devices own independently scoped child connections', async (t) => {
       connectionType: 'mcp', indexTrigger: 'double-click-hold'
     }),
     (error) => error.code === 'invalid_index_trigger'
+  );
+  assert.throws(
+    () => createDeviceConnection(value.db, value.cryptoService, index.id, {
+      connectionType: 'mcp', mcpTopic: 'calendar'
+    }),
+    (error) => error.code === 'mcp_topic_unavailable'
+  );
+  assert.throws(
+    () => createDeviceConnection(value.db, value.cryptoService, index.id, { mcpTopic: 'notes' }),
+    (error) => error.code === 'invalid_mcp_topic'
   );
 
   const pebble = createClientDevice(value.db, { name: 'Pebble Time', type: 'pebble' });
@@ -268,11 +280,12 @@ test('database migration preserves legacy credential IDs and tokens idempotently
     try { migrated.close(); } catch {}
     fs.rmSync(directory, { recursive: true, force: true });
   });
-  const stored = migrated.prepare('SELECT id, owner_device_id, connection_label FROM device_credentials').get();
+  const stored = migrated.prepare('SELECT id, owner_device_id, connection_label, mcp_topic FROM device_credentials').get();
   assert.deepEqual({ ...stored }, {
     id: credentialId,
     owner_device_id: credentialId,
-    connection_label: 'Existing client'
+    connection_label: 'Existing client',
+    mcp_topic: null
   });
   assert.deepEqual(
     { ...migrated.prepare('SELECT id, name, type FROM client_devices').get() },

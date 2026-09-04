@@ -90,7 +90,7 @@ test('admin groups typed devices with one-time child connection tokens', async (
   );
   assert.equal(hold.status, 201);
   assert.match(hold.body.token, /^pp_/);
-  assert.equal(hold.body.connection.label, 'Ring Button Hold & Talk');
+  assert.equal(hold.body.connection.label, 'Hold & Talk');
   assert.equal(hold.body.connection.connectionType, 'webhook');
   assert.equal(hold.body.connection.indexTrigger, 'single-click-hold');
   assert.deepEqual(hold.body.connection.scopes, ['webhook:write']);
@@ -102,10 +102,12 @@ test('admin groups typed devices with one-time child connection tokens', async (
     app.router,
     'POST',
     `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
-    { connectionType: 'mcp', label: 'Proxy organizer' }
+    { connectionType: 'mcp', mcpTopic: 'notes' }
   );
   assert.equal(mcp.status, 201);
   assert.equal(mcp.body.connection.connectionType, 'mcp');
+  assert.equal(mcp.body.connection.label, 'Notes');
+  assert.equal(mcp.body.connection.mcpTopic, 'notes');
   assert.deepEqual(mcp.body.connection.scopes, ['mcp:invoke']);
   assert.equal(mcp.body.connection.indexTrigger, null);
   assert.equal(mcp.body.connection.webhookPath, null);
@@ -154,7 +156,7 @@ test('admin groups typed devices with one-time child connection tokens', async (
   });
   const notes = await dispatch(app.router, 'GET', '/admin/api/notes');
   assert.equal(notes.body.notes[0].device_name, 'My Index');
-  assert.equal(notes.body.notes[0].connection_label, 'Ring Button Hold & Talk');
+  assert.equal(notes.body.notes[0].connection_label, 'Hold & Talk');
   assert.equal(notes.body.notes[0].owner_device_id, createdIndex.body.device.id);
 
   await assert.rejects(
@@ -165,6 +167,15 @@ test('admin groups typed devices with one-time child connection tokens', async (
       { scopes: ['webhook:write', 'ai:chat'] }
     ),
     (error) => error.code === 'invalid_index_scopes'
+  );
+  await assert.rejects(
+    dispatch(
+      app.router,
+      'POST',
+      `/admin/api/device-groups/${createdIndex.body.device.id}/connections`,
+      { connectionType: 'mcp', mcpTopic: 'messaging' }
+    ),
+    (error) => error.code === 'mcp_topic_unavailable'
   );
   await assert.rejects(
     dispatch(

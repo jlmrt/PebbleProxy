@@ -2,7 +2,7 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.13"
+version: "0.1.0-test.14"
 tagline: A private voice and AI gateway for Pebble apps
 icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
@@ -23,6 +23,6 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Keeps descriptive voice captures as notes even when they mention future work or dates.
-  Reminder creation now requires an explicit reminder request or a standalone timed task,
-  while notes continue to preserve the complete original transcript.
+  Streamlines Index connection setup with Ring Button presets and custom naming. Index MCP
+  connections are now separated by topic, with independently scoped Notes and Reminders
+  servers that expose only their own tools.

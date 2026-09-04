@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.13">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.14">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -144,7 +144,7 @@
                       <h4>Configure a webhook or custom MCP server</h4>
                       <div class="route-explanation"><strong>Use the connection-specific setup</strong><p>Create the Index device and choose a recording webhook or custom MCP connection in step 2. The one-time token screen gives you the matching URL and authorization instructions. You can copy the endpoint again later from Devices.</p><button class="button button-secondary" type="button" data-go="devices">Open Devices</button></div>
                       <div class="copy-field copy-field-secondary"><label for="setup-index-header-name">Custom header → Name</label><div><input id="setup-index-header-name" type="text" value="X-Widget-Token" readonly spellcheck="false"><button type="button" class="copy-button" data-copy-target="setup-index-header-name">Copy</button></div></div>
-                      <dl class="placement-list"><div><dt>Webhook header</dt><dd>Paste <code>X-Widget-Token</code> into the first custom-header field and the raw <code>pp_…</code> token into the second, without <code>Bearer</code>.</dd></div><div><dt>Webhook send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Webhook gestures</dt><dd>Use one connection for both gestures, or make two connections when each gesture needs its own route.</dd></div><div><dt>Custom MCP</dt><dd>Create an Index MCP connection to get a Streamable HTTP URL and <code>Bearer</code> authorization value for an MCP Sandbox group.</dd></div></dl>
+                      <dl class="placement-list"><div><dt>Webhook header</dt><dd>Paste <code>X-Widget-Token</code> into the first custom-header field and the raw <code>pp_…</code> token into the second, without <code>Bearer</code>.</dd></div><div><dt>Webhook send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Ring Button</dt><dd>Use one connection for both recording button patterns, or make two connections when each one needs its own route.</dd></div><div><dt>Custom MCP</dt><dd>Create an Index MCP connection to get a Streamable HTTP URL and <code>Bearer</code> authorization value for an MCP Sandbox group.</dd></div></dl>
                     </article>
                     <article class="client-guide-card">
                       <span class="client-type">Pebble watch app / custom client</span>
@@ -221,7 +221,7 @@
                   <label for="pebble-webhook-url">Legacy shared webhook URL</label>
                   <div><input id="pebble-webhook-url" type="text" readonly spellcheck="false" placeholder="Set the public HTTPS origin above"><button type="button" class="copy-button" id="copy-pebble-webhook-url" data-copy-target="pebble-webhook-url" disabled>Copy</button></div>
                 </div>
-                <p class="helper">Existing integrations may keep using this shared route. For a new Index, create a typed device and copy its connection-specific URL from <strong>Devices</strong>; this preserves the selected gesture and makes each connection independently revocable.</p>
+                <p class="helper">Existing integrations may keep using this shared route. For a new Index, create a typed device and copy its connection-specific URL from <strong>Devices</strong>; this preserves the selected Ring Button option and makes each connection independently revocable.</p>
                 <div class="copy-field copy-field-secondary">
                   <label for="cloudflare-service-url">Published application Service URL (advanced/direct container)</label>
                   <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" placeholder="Loading from Pebble Proxy"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url" disabled>Copy</button></div>
@@ -438,23 +438,22 @@
         <div class="modal-header"><div><span class="eyebrow">Device connection</span><h2 id="connection-dialog-title">Create connection</h2></div><button class="icon-button modal-close" type="button" data-dialog-dismiss aria-label="Close">×</button></div>
         <p class="modal-intro" id="connection-dialog-intro">Create a separately revocable token for this device.</p>
         <input name="deviceId" type="hidden"><input name="deviceType" type="hidden">
-        <label class="field"><span>Connection name</span><input name="label" maxlength="80" placeholder="Primary connection" autocomplete="off"></label>
         <div id="index-connection-fields">
           <div class="preset-picker connection-type-picker" role="radiogroup" aria-label="Index connection type">
             <label><input type="radio" name="connectionType" value="webhook" checked><span><b>Recording webhook</b><small>Receive text and audio</small></span></label>
             <label><input type="radio" name="connectionType" value="mcp"><span><b>Custom MCP server</b><small>Expose approved tools</small></span></label>
           </div>
           <div id="index-webhook-fields">
-            <label class="field"><span>Index gesture</span><select name="indexTrigger"><option value="all">Hold & Talk and Double Click & Hold</option><option value="single-click-hold">Ring Button Hold & Talk</option><option value="double-click-hold">Double Click & Hold</option></select><small>Use one shared connection for both gestures, or create one connection per gesture when you want independent webhook routes.</small></label>
-            <article class="info-strip compact-info"><span aria-hidden="true">i</span><p>The next screen gives you the exact webhook URL, header name, and one-time token to paste into the Pebble phone app.</p></article>
+            <label class="field"><span>Ring Button</span><select name="indexTrigger"><option value="single-click-hold">Hold &amp; Talk</option><option value="double-click-hold">Double click &amp; hold</option><option value="all">Both</option><option value="custom">Custom</option></select><small>Choose which recording button pattern sends recordings to this webhook.</small></label>
           </div>
           <div id="index-mcp-fields" hidden>
-            <article class="info-strip compact-info"><span aria-hidden="true">i</span><p>Pebble Proxy provides a Streamable HTTP MCP server with device-private note and reminder tools. Add it to a cloud MCP Sandbox group in the Pebble app; the next screen gives you its URL and <code>Authorization</code> value.</p></article>
+            <label class="field"><span>Topic</span><select name="mcpTopic"><option value="notes">Notes</option><option value="reminders">Reminders</option><option value="calendar" disabled>Calendar — coming later</option><option value="messaging" disabled>Messaging — coming later</option></select><small>Create a separate MCP connection for each available topic.</small></label>
           </div>
         </div>
+        <label class="field" id="connection-name-field"><span>Name</span><input name="label" maxlength="80" placeholder="Primary connection" autocomplete="off"></label>
         <fieldset class="scope-field" id="pebble-connection-scopes"><legend>Allowed capabilities</legend><label><input type="checkbox" name="scopes" value="ai:chat" checked><span><strong>AI chat</strong><small>Use the OpenAI-compatible endpoint</small></span></label><label><input type="checkbox" name="scopes" value="webhook:write" checked><span><strong>Voice webhook</strong><small>Upload recordings and transcripts</small></span></label><label><input type="checkbox" name="scopes" value="tts:speech" checked><span><strong>Spoken audio</strong><small>Generate audio through the private Kokoro app</small></span></label><label><input type="checkbox" name="scopes" value="mcp:invoke" checked><span><strong>MCP tools</strong><small>Use approved notes and reminder tools</small></span></label></fieldset>
-        <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expires</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
-        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Create connection</button></div>
+        <div class="field-grid"><label class="field"><span>Requests per minute</span><input name="rateLimit" type="number" min="1" max="600" value="30"></label><label class="field"><span>Expiration</span><select name="expiresIn"><option value="never">Never</option><option value="30d">30 days</option><option value="90d">90 days</option><option value="1y">1 year</option></select></label></div>
+        <div class="modal-actions"><button class="button button-secondary" type="button" data-dialog-dismiss>Cancel</button><button class="button button-primary" value="default" type="submit">Create</button></div>
       </form>
     </dialog>
 
@@ -472,7 +471,7 @@
           </div>
           <div class="token-placement">
             <strong id="token-webhook-heading">Pebble Index / CoreApp</strong>
-            <p id="token-index-instruction">Paste the URL above into the matching Index gesture’s Webhook settings. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw token into the second. Do not add <code>Bearer</code>.</p>
+            <p id="token-index-instruction">Paste the URL above into the matching Ring Button option’s Webhook settings. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw token into the second. Do not add <code>Bearer</code>.</p>
             <div class="copy-field copy-field-secondary"><label for="new-device-header-name">Custom header → Name</label><div><input id="new-device-header-name" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-name">Copy</button></div></div>
             <div class="copy-field copy-field-secondary"><label for="new-device-header-value">Custom header → Value</label><div><input id="new-device-header-value" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-value">Copy</button></div></div>
           </div>
@@ -544,7 +543,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.13" defer></script>
-    <script src="/app.js?v=0.1.0-test.13" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.14" defer></script>
+    <script src="/app.js?v=0.1.0-test.14" defer></script>
   </body>
 </html>

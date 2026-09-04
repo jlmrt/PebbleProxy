@@ -19,7 +19,7 @@ ROUTER_METADATA = {
     "model": "needle2-base",
     "package": "cactus-needle",
     "package_version": NEEDLE_PACKAGE_VERSION,
-    "router_version": "0.1.0-test.13",
+    "router_version": "0.1.0-test.14",
     "tool_schema_version": "4",
 }
 TOOLS = [

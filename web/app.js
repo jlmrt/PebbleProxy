@@ -770,10 +770,18 @@
   }
 
   function indexTriggerLabel(trigger) {
-    if (trigger === "single-click-hold") return "Ring Button Hold & Talk";
-    if (trigger === "double-click-hold") return "Double Click & Hold";
-    if (trigger === "all") return "Both recording gestures";
+    if (trigger === "single-click-hold") return "Hold & Talk";
+    if (trigger === "double-click-hold") return "Double click & hold";
+    if (trigger === "all") return "Both";
     return "General connection";
+  }
+
+  function mcpTopicLabel(topic) {
+    if (topic === "notes") return "Notes";
+    if (topic === "reminders") return "Reminders";
+    if (topic === "calendar") return "Calendar";
+    if (topic === "messaging") return "Messaging";
+    return "Organizer";
   }
 
   function connectionWebhookUrl(connection) {
@@ -810,6 +818,7 @@
         first(connection, ["label", "name"]),
         first(connection, ["tokenPrefix", "token_prefix"]),
         first(connection, ["indexTrigger", "index_trigger"]),
+        first(connection, ["mcpTopic", "mcp_topic"]),
         first(connection, ["connectionType", "connection_type"]),
         ...(Array.isArray(connection.scopes) ? connection.scopes : []),
       ])]
@@ -841,6 +850,7 @@
         const { revoked, expired, inactive, expiresAt } = connectionState(connection);
         const scopes = Array.isArray(connection.scopes) ? connection.scopes : [];
         const trigger = plainText(first(connection, ["indexTrigger", "index_trigger"]), "");
+        const mcpTopic = plainText(first(connection, ["mcpTopic", "mcp_topic"]), "");
         const connectionType = type === "index" ? indexConnectionType(connection) : "client";
         const isIndexMcp = type === "index" && connectionType === "mcp";
         const webhookUrl = connectionWebhookUrl(connection);
@@ -858,7 +868,7 @@
           actions.unshift(copy);
         }
         const connectionSummary = isIndexMcp
-          ? "Custom MCP server · Streamable HTTP"
+          ? `Custom MCP server · ${mcpTopicLabel(mcpTopic)} · Streamable HTTP`
           : trigger
             ? indexTriggerLabel(trigger)
             : `Token ${plainText(first(connection, ["tokenPrefix", "token_prefix"]), "unknown")}…`;
@@ -944,12 +954,16 @@
     const connectionType = plainText(new FormData(form).get("connectionType"), "webhook");
     const isIndex = type === "index";
     const isWebhook = isIndex && connectionType === "webhook";
+    const triggerChoice = plainText(form.elements.indexTrigger.value, "single-click-hold");
+    const isCustomWebhook = isWebhook && triggerChoice === "custom";
     $("#index-webhook-fields").hidden = !isWebhook;
     $("#index-mcp-fields").hidden = !isIndex || isWebhook;
     form.elements.indexTrigger.disabled = !isWebhook;
-    form.elements.label.placeholder = isIndex
-      ? isWebhook ? "Both recording gestures" : "Pebble Proxy tools"
-      : "Primary connection";
+    form.elements.mcpTopic.disabled = !isIndex || isWebhook;
+    $("#connection-name-field").hidden = isIndex && !isCustomWebhook;
+    form.elements.label.disabled = isIndex && !isCustomWebhook;
+    form.elements.label.required = isCustomWebhook;
+    form.elements.label.placeholder = isCustomWebhook ? "Webhook name" : "Primary connection";
   }
 
   function showConnectionDialog(device) {
@@ -1011,6 +1025,7 @@
     const speechUrl = connectionEndpointUrl(connection, ["speechUrl", "speech_url"], state.publicBaseUrl ? `${state.publicBaseUrl}/v1/audio/speech` : "");
     const mcpUrl = connectionEndpointUrl(connection, ["mcpUrl", "mcp_url"], state.publicMcpUrl);
     const trigger = plainText(first(connection, ["indexTrigger", "index_trigger"]), "");
+    const mcpTopic = plainText(first(connection, ["mcpTopic", "mcp_topic"]), "");
     const label = plainText(first(connection, ["label", "name"]), "New connection");
     $("#new-device-token").value = plainText(token, "");
     $("#new-device-header-name").value = "X-Widget-Token";
@@ -1023,8 +1038,8 @@
     $("#token-api-instruction").hidden = !apiScopes.length;
     const apiEndpoints = [];
     if (isIndexMcp) {
-      apiEndpoints.push(["MCP tools", mcpUrl || "Set the public HTTPS origin, then use /mcp"]);
-      $("#token-api-heading").textContent = "Pebble Index custom MCP server";
+      apiEndpoints.push([`${mcpTopicLabel(mcpTopic)} MCP`, mcpUrl || "Set the public HTTPS origin, then use /mcp"]);
+      $("#token-api-heading").textContent = `Pebble Index ${mcpTopicLabel(mcpTopic)} MCP server`;
       $("#token-api-copy").replaceChildren(
         "In the Pebble app, add an HTTP MCP server and choose ",
         node("strong", { text: "Streamable HTTP" }),
@@ -1105,7 +1120,12 @@
       };
       if (type === "index") {
         body.connectionType = plainText(data.get("connectionType"), "webhook");
-        if (body.connectionType === "webhook") body.indexTrigger = plainText(data.get("indexTrigger"), "all");
+        if (body.connectionType === "webhook") {
+          const triggerChoice = plainText(data.get("indexTrigger"), "single-click-hold");
+          body.indexTrigger = triggerChoice === "custom" ? "all" : triggerChoice;
+        } else {
+          body.mcpTopic = plainText(data.get("mcpTopic"), "notes");
+        }
       } else body.scopes = scopes;
       const response = await api(`/device-groups/${safeId(id)}/connections`, { method: "POST", body });
       const connection = objectFrom(response, ["connection", "credential"]);
@@ -2354,6 +2374,7 @@
     for (const radio of $$('.connection-type-picker input[name="connectionType"]', $("#connection-form"))) {
       radio.addEventListener("change", updateConnectionTypeFields);
     }
+    $("#connection-form").elements.indexTrigger.addEventListener("change", updateConnectionTypeFields);
     $("#backend-auth-type").addEventListener("change", updateBackendAuthFields);
     $("#test-stt").addEventListener("click", (event) => testStt(event.currentTarget));
     $("#test-tts").addEventListener("click", (event) => testTts(event.currentTarget));
