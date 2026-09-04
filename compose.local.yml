@@ -1,7 +1,7 @@
 services:
   pebble-proxy:
     build: .
-    image: pebble-proxy:0.1.0
+    image: pebble-proxy:0.1.0-test.7
     restart: unless-stopped
     environment:
       ROLE: all
@@ -9,9 +9,28 @@ services:
       NODE_ENV: production
       APP_SEED: ${APP_SEED:-local-development-change-me}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      NEEDLE_ROUTER_URL: http://needle:8090
     ports:
       - "3000:3000"
       - "8080:8080"
     volumes:
       - ./data:/data
+    networks:
+      - default
+      - processing_internal
 
+  needle:
+    build: ./needle-sidecar
+    image: pebble-proxy-needle:0.1.0-test.7
+    restart: unless-stopped
+    read_only: true
+    environment:
+      NEEDLE_TELEMETRY: "0"
+      DO_NOT_TRACK: "1"
+      HF_HUB_OFFLINE: "1"
+    networks:
+      - processing_internal
+
+networks:
+  processing_internal:
+    internal: true

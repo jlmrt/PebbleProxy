@@ -1,9 +1,17 @@
 import crypto from 'node:crypto';
+import { createNote, createReminder } from './actions.js';
 import { createDevice, listDevices, resetDeviceSessions, revokeDevice } from './auth.js';
 import { HttpError, readJson, sendJson, safeJson } from './http.js';
 import { nowIso } from './db.js';
 import { checkSttHealth } from './recordings.js';
 import { checkTtsHealth } from './tts.js';
+import {
+  checkProcessingHealth,
+  currentProcessingConfig,
+  listProcessingJobs,
+  processingConfigView,
+  retryProcessingJob
+} from './processing.js';
 import {
   joinBackendUrl,
   parseBackendBaseUrl,
@@ -242,7 +250,6 @@ function ensureAlias(value) {
 }
 
 const PUBLIC_BASE_URL_SETTING = 'public_base_url';
-const CLOUDFLARED_SERVICE_URL = 'http://pebble-proxy_api_1:8080';
 
 function normalizePublicBaseUrl(value) {
   const raw = String(value || '').trim();
@@ -275,14 +282,15 @@ function configuredPublicBaseUrl(db, config) {
 function connectivityView(db, config) {
   const publicBaseUrl = configuredPublicBaseUrl(db, config);
   const webhookUrl = publicBaseUrl ? `${publicBaseUrl}/webhooks/index` : '';
+  const serviceUrl = `http://${config.umbrelAppId}_api_1:8080`;
   return {
     publicBaseUrl,
     publicHostname: publicBaseUrl,
     cloudflare: {
       managedExternally: true,
       status: 'not_checked',
-      serviceUrl: CLOUDFLARED_SERVICE_URL,
-      publicTarget: CLOUDFLARED_SERVICE_URL,
+      serviceUrl,
+      publicTarget: serviceUrl,
       routeMode: 'internal_container',
       hostPortPublished: false,
       adminPort: 9432,
@@ -302,9 +310,10 @@ function overview(db, config) {
   const count = (table, where = '') => db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get().count;
   const stt = db.prepare('SELECT health_status, enabled FROM stt_config WHERE id = 1').get();
   const tts = db.prepare('SELECT health_status, enabled FROM tts_config WHERE id = 1').get();
+  const processing = currentProcessingConfig(db);
   const connectivity = connectivityView(db, config);
   return {
-    version: '0.1.0',
+    version: '0.1.0-test.7',
     role: config.role,
     publicBaseUrl: connectivity.publicBaseUrl,
     publicHostname: connectivity.publicHostname,
@@ -316,10 +325,16 @@ function overview(db, config) {
       recordings: count('recordings'),
       recordingsPending: count('recordings', "WHERE stt_state IN ('received','transcribing')"),
       notes: count('notes', 'WHERE archived = 0'),
-      reminders: count('reminders', 'WHERE completed_at IS NULL')
+      reminders: count('reminders', 'WHERE completed_at IS NULL'),
+      processingPending: count('processing_jobs', "WHERE status IN ('pending','processing','needs_review')")
     },
     stt: { enabled: Boolean(stt.enabled), healthStatus: stt.health_status, status: stt.health_status },
     tts: { enabled: Boolean(tts.enabled), healthStatus: tts.health_status, status: tts.health_status },
+    processing: {
+      enabled: Boolean(processing.enabled),
+      healthStatus: processing.health_status,
+      status: processing.health_status
+    },
     cloudflare: connectivity.cloudflare,
     publicApi: connectivity.publicApi
   };
@@ -517,6 +532,46 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     sendJson(res, 202, { ok: false, scheduled: true, status: 'pending', message: 'Text-to-speech health check scheduled' });
   });
 
+  router.add('GET', '/admin/api/processing', (_req, res) => {
+    sendJson(res, 200, {
+      processing: processingConfigView(currentProcessingConfig(db)),
+      jobs: listProcessingJobs(db, 100)
+    });
+  });
+  router.add('PUT', '/admin/api/processing', async (req, res) => {
+    const input = await readJson(req, config.maxJsonBytes);
+    const current = currentProcessingConfig(db);
+    const threshold = input.confidenceThreshold === undefined
+      ? Number(current.confidence_threshold)
+      : Number(input.confidenceThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0.05 || threshold > 0.99) {
+      throw new HttpError(400, 'invalid_confidence_threshold', 'Confidence threshold must be between 0.05 and 0.99');
+    }
+    const rawAlias = input.agentAlias === undefined ? current.agent_alias : input.agentAlias;
+    const agentAlias = rawAlias == null || String(rawAlias).trim() === '' ? null : ensureAlias(rawAlias);
+    if (agentAlias && !db.prepare(`SELECT ma.alias FROM model_aliases ma
+      JOIN ai_providers p ON p.id = ma.provider_id
+      WHERE ma.alias = ? AND ma.enabled = 1 AND p.enabled = 1`).get(agentAlias)) {
+      throw new HttpError(400, 'invalid_agent_alias', 'Select an enabled agent alias');
+    }
+    db.prepare(`UPDATE processing_config SET enabled = ?, confidence_threshold = ?, agent_alias = ?,
+      revision = revision + 1, updated_at = ? WHERE id = 1`).run(
+      boolean(input.enabled, Boolean(current.enabled)) ? 1 : 0,
+      threshold,
+      agentAlias,
+      nowIso()
+    );
+    sendJson(res, 200, { processing: processingConfigView(currentProcessingConfig(db)) });
+  });
+  router.add('POST', '/admin/api/processing/test', async (_req, res) => {
+    const result = await checkProcessingHealth({ db, cryptoService, config });
+    sendJson(res, result.ok ? 200 : 503, result);
+  });
+  router.add('POST', '/admin/api/processing/jobs/:id/retry', (_req, res, { params }) => {
+    retryProcessingJob(db, params.id);
+    sendJson(res, 202, { ok: true, queued: true });
+  });
+
   router.add('GET', '/admin/api/notes', (_req, res) => {
     const notes = db.prepare(`SELECT n.id, n.title, n.body, n.archived, n.created_at, n.updated_at,
       d.id AS device_id, d.name AS device_name FROM notes n JOIN device_credentials d ON d.id = n.device_id
@@ -532,11 +587,8 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     if (!input.deviceId) throw new HttpError(400, 'device_required', 'Select the device that owns this note');
     const device = db.prepare('SELECT id FROM device_credentials WHERE id = ? AND revoked_at IS NULL').get(String(input.deviceId));
     if (!device) throw new HttpError(400, 'device_required', 'Select an active device for this note');
-    const id = crypto.randomUUID();
-    const now = nowIso();
-    db.prepare('INSERT INTO notes (id, device_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, device.id, title, body, now, now);
-    sendJson(res, 201, { note: db.prepare('SELECT id, device_id, title, body, archived, created_at, updated_at FROM notes WHERE id = ?').get(id) });
+    const note = createNote(db, device.id, { title, body });
+    sendJson(res, 201, { note });
   });
   router.add('DELETE', '/admin/api/notes/:id', (_req, res, { params }) => {
     const changed = db.prepare('DELETE FROM notes WHERE id = ?').run(params.id);
@@ -544,7 +596,7 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     sendJson(res, 200, { ok: true });
   });
   router.add('GET', '/admin/api/reminders', (_req, res) => {
-    const reminders = db.prepare(`SELECT r.id, r.title, r.due_at, r.timezone, r.completed_at, r.created_at, r.updated_at,
+    const reminders = db.prepare(`SELECT r.id, r.title, r.due_at, r.due_text, r.timezone, r.completed_at, r.created_at, r.updated_at,
       d.id AS device_id, d.name AS device_name FROM reminders r JOIN device_credentials d ON d.id = r.device_id
       ORDER BY r.completed_at IS NOT NULL, r.due_at IS NULL, r.due_at LIMIT 200`).all();
     sendJson(res, 200, { reminders });
@@ -563,11 +615,12 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     if (!input.deviceId) throw new HttpError(400, 'device_required', 'Select the device that owns this reminder');
     const device = db.prepare('SELECT id FROM device_credentials WHERE id = ? AND revoked_at IS NULL').get(String(input.deviceId));
     if (!device) throw new HttpError(400, 'device_required', 'Select an active device for this reminder');
-    const id = crypto.randomUUID();
-    const now = nowIso();
-    db.prepare(`INSERT INTO reminders (id, device_id, title, due_at, timezone, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, device.id, title, dueAt, input.timezone ? String(input.timezone).slice(0, 80) : null, now, now);
-    sendJson(res, 201, { reminder: db.prepare('SELECT id, device_id, title, due_at, timezone, completed_at, created_at, updated_at FROM reminders WHERE id = ?').get(id) });
+    const reminder = createReminder(db, device.id, {
+      title,
+      due_at: dueAt,
+      timezone: input.timezone ? String(input.timezone).slice(0, 80) : null
+    });
+    sendJson(res, 201, { reminder });
   });
   router.add('PATCH', '/admin/api/reminders/:id', async (req, res, { params }) => {
     const input = await readJson(req, config.maxJsonBytes);
@@ -576,7 +629,7 @@ export function registerAdminRoutes(router, { db, cryptoService, config }) {
     const changed = db.prepare('UPDATE reminders SET completed_at = ?, updated_at = ? WHERE id = ?')
       .run(input.completed ? now : null, now, params.id);
     if (!changed.changes) throw new HttpError(404, 'reminder_not_found', 'Reminder not found');
-    sendJson(res, 200, { reminder: db.prepare('SELECT id, device_id, title, due_at, timezone, completed_at, created_at, updated_at FROM reminders WHERE id = ?').get(params.id) });
+    sendJson(res, 200, { reminder: db.prepare('SELECT id, device_id, title, due_at, due_text, timezone, completed_at, created_at, updated_at FROM reminders WHERE id = ?').get(params.id) });
   });
   router.add('DELETE', '/admin/api/reminders/:id', (_req, res, { params }) => {
     const changed = db.prepare('DELETE FROM reminders WHERE id = ?').run(params.id);

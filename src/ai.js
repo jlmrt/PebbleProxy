@@ -725,6 +725,119 @@ function attachAbort(req, res, controller) {
   };
 }
 
+/**
+ * Send one transcript to an administrator-selected agent alias. This uses the
+ * same destination, credential, response validation, and device-alias policy
+ * as the public OpenAI-compatible route without exposing a device token.
+ */
+export async function completeForDevice(deps, { device, aliasName, text }) {
+  const { db, cryptoService, config = {} } = deps;
+  if (!db?.prepare || !cryptoService || !device?.id) {
+    throw new TypeError('completeForDevice requires db, cryptoService, and a device');
+  }
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new GatewayError(400, 'invalid_transcript', 'A transcript is required.');
+  }
+  const alias = selectAlias(db, device, aliasName);
+  if (!alias) {
+    throw new GatewayError(404, 'model_not_found', 'The forwarding alias is not available to this device.');
+  }
+
+  const requestId = crypto.randomUUID();
+  const startedAt = performance.now();
+  let status = 500;
+  let errorCode = 'internal_error';
+  let usage;
+  const controller = new AbortController();
+  const configuredTimeout = integer(config.aiTimeoutMs, 90_000, 10, 600_000);
+  const timeoutMs = Math.max(10, Math.min(integer(alias.timeout_ms, configuredTimeout, 10, 600_000), configuredTimeout));
+  const timeout = setTimeout(() => controller.abort(new Error('upstream timeout')), timeoutMs);
+  timeout.unref?.();
+
+  try {
+    const profile = { id: alias.profile_id, instructions: alias.profile_instructions };
+    const normalized = normalizeRequest({
+      model: alias.alias,
+      messages: [{ role: 'user', content: text }],
+      stream: false,
+      max_tokens: Math.min(1024, Number(alias.max_output_tokens) || 1024)
+    }, alias, profile, config);
+    const outbound = outboundRequest(alias, normalized, null, device, cryptoService, requestId);
+    const target = exactTarget(alias);
+    const providerConfig = safeJson(alias.provider_config_json, {}) || {};
+    let response;
+    try {
+      response = await (deps.aiFetchImpl || secureFetch)(target, {
+        method: 'POST',
+        headers: outbound.headers,
+        body: JSON.stringify(outbound.body),
+        redirect: 'manual',
+        signal: controller.signal
+      }, {
+        internal: providerConfig.internal !== false,
+        allowLoopback: config.nodeEnv === 'test'
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new GatewayError(504, 'upstream_timeout', 'The AI backend timed out.', { upstream: true, health: 'unavailable' });
+      }
+      if (error instanceof HttpError && error.code === 'unsafe_backend') {
+        throw new GatewayError(503, 'backend_misconfigured', 'The AI backend destination is not allowed.', { upstream: true });
+      }
+      throw new GatewayError(503, 'backend_unavailable', 'The AI backend is temporarily unavailable.', {
+        upstream: true, health: 'unavailable'
+      });
+    }
+
+    const maxResponseBytes = integer(config.aiMaxResponseBytes, 2 * 1024 * 1024, 1024, 32 * 1024 * 1024);
+    const maxResponseChars = integer(config.aiMaxResponseChars, 262_144, 256, 4 * 1024 * 1024);
+    await throwForUpstreamStatus(response, maxResponseBytes);
+    const body = await limitedResponseText(response, maxResponseBytes);
+    let value;
+    try { value = JSON.parse(body); }
+    catch { throw new GatewayError(502, 'invalid_backend_response', 'The AI backend returned invalid JSON.', { upstream: true }); }
+    const normalizedResponse = normalizeCompletion(
+      value,
+      alias.alias,
+      `chatcmpl_${crypto.randomBytes(18).toString('base64url')}`,
+      Math.floor(Date.now() / 1000),
+      maxResponseChars
+    );
+    usage = normalizedResponse.usage;
+    status = 200;
+    errorCode = null;
+    markProvider(db, alias.provider_id, 'healthy');
+    return {
+      alias: alias.alias,
+      content: normalizedResponse.response.choices[0].message.content,
+      usage: usage || null,
+      requestId
+    };
+  } catch (error) {
+    const details = publicError(error, controller.signal.aborted ? 'timeout' : '');
+    status = details.status;
+    errorCode = details.code;
+    if (alias.provider_id && (error?.upstream || controller.signal.aborted)) {
+      markProvider(db, alias.provider_id, controller.signal.aborted ? 'unavailable' : error.health || 'degraded', details.code);
+    }
+    const publicFailure = new Error(details.message);
+    publicFailure.code = details.code;
+    publicFailure.status = details.status;
+    throw publicFailure;
+  } finally {
+    clearTimeout(timeout);
+    audit(db, {
+      requestId,
+      deviceId: device.id,
+      alias: alias.alias,
+      status,
+      duration: performance.now() - startedAt,
+      usage,
+      errorCode
+    });
+  }
+}
+
 export function registerAiRoutes(router, deps) {
   const { db, cryptoService, config = {}, authenticate, limiter } = deps;
   if (!router?.add || !db?.prepare || !cryptoService || typeof authenticate !== 'function') {

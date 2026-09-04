@@ -32,13 +32,14 @@ async function dispatch(router, method, url, body) {
   return { status: res.statusCode, body: res.json() };
 }
 
-function fixture(t) {
+function fixture(t, configOverrides = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pebble-proxy-admin-'));
   const db = createDatabase(path.join(dataDir, 'db.sqlite'));
   const cryptoService = createCryptoService({ dataDir, appSeed: 'admin-test-seed' });
   const config = {
     role: 'all', publicBaseUrl: 'https://pebble.example', maxJsonBytes: 128 * 1024,
-    aiTimeoutMs: 90_000, nodeEnv: 'test'
+    aiTimeoutMs: 90_000, nodeEnv: 'test', umbrelAppId: 'pebble-proxy',
+    ...configOverrides
   };
   const router = new Router();
   registerAdminRoutes(router, { db, cryptoService, config });
@@ -85,6 +86,18 @@ test('admin exposes and persists exact public client endpoints', async (t) => {
 
   const persisted = await dispatch(app.router, 'GET', '/admin/api/overview');
   assert.equal(persisted.body.publicBaseUrl, 'https://voice.example:8443');
+});
+
+test('admin derives internal API targets from the configured Umbrel app ID', async (t) => {
+  for (const umbrelAppId of ['jlmrt-pebble-proxy', 'community42-pebble-proxy']) {
+    await t.test(umbrelAppId, async (t) => {
+      const app = fixture(t, { umbrelAppId });
+      const overview = await dispatch(app.router, 'GET', '/admin/api/overview');
+      const expected = `http://${umbrelAppId}_api_1:8080`;
+      assert.equal(overview.body.connectivity.cloudflare.serviceUrl, expected);
+      assert.equal(overview.body.connectivity.cloudflare.publicTarget, expected);
+    });
+  }
 });
 
 test('admin rejects unsafe or ambiguous public origins', async (t) => {
@@ -165,6 +178,27 @@ test('admin configures the official Umbrel Kokoro service and queues health chec
   const scheduled = await dispatch(app.router, 'POST', '/admin/api/tts/test');
   assert.equal(scheduled.status, 202);
   assert.equal(app.db.prepare("SELECT value FROM settings WHERE key = 'health_request:tts'").get().value, 'pending');
+});
+
+test('admin keeps local transcript processing off until explicitly enabled', async (t) => {
+  const app = fixture(t);
+  const initial = await dispatch(app.router, 'GET', '/admin/api/processing');
+  assert.equal(initial.body.processing.enabled, false);
+  assert.equal(initial.body.processing.confidenceThreshold, 0.2);
+  assert.deepEqual(initial.body.jobs, []);
+
+  const updated = await dispatch(app.router, 'PUT', '/admin/api/processing', {
+    enabled: true,
+    confidenceThreshold: 0.35,
+    agentAlias: null
+  });
+  assert.equal(updated.body.processing.enabled, true);
+  assert.equal(updated.body.processing.confidenceThreshold, 0.35);
+  assert.equal(updated.body.processing.agentAlias, null);
+  await assert.rejects(
+    dispatch(app.router, 'PUT', '/admin/api/processing', { confidenceThreshold: 0.01 }),
+    (error) => error.code === 'invalid_confidence_threshold'
+  );
 });
 
 test('admin organizer actions share the same device-scoped MCP data', async (t) => {

@@ -33,6 +33,11 @@
       subtitle: "Audio and transcripts received from your Pebble devices.",
       load: loadRecordings,
     },
+    processing: {
+      title: "Transcript actions",
+      subtitle: "Local Needle routing for notes, reminders, and private agents.",
+      load: loadProcessing,
+    },
     organizer: {
       title: "Notes & reminders",
       subtitle: "Useful, local tools for voice-first assistants.",
@@ -75,6 +80,7 @@
     recordings: [],
     notes: [],
     reminders: [],
+    processingJobs: [],
     selectedRecording: null,
     pollTimer: null,
     publicBaseUrl: "",
@@ -340,7 +346,7 @@
   function normalizeStatus(value, fallback = "unknown") {
     const status = plainText(value, fallback).toLowerCase().replace(/[^a-z0-9_-]/g, "");
     if (["ok", "online", "healthy", "ready", "connected", "up"].includes(status)) return "healthy";
-    if (["warning", "degraded", "starting", "transcribing", "received", "pending"].includes(status)) return status;
+    if (["warning", "degraded", "starting", "transcribing", "received", "pending", "needs_review"].includes(status)) return status;
     if (["error", "failed", "offline", "down", "unhealthy", "unavailable"].includes(status)) return "error";
     if (["disabled", "inactive"].includes(status)) return "disabled";
     return status || fallback;
@@ -361,7 +367,7 @@
               ? "badge-error"
               : normalized === "disabled"
                 ? "badge-disabled"
-                : normalized === "degraded" || normalized === "pending" || normalized === "starting"
+                : normalized === "degraded" || normalized === "pending" || normalized === "starting" || normalized === "needs_review"
                   ? "badge-warning"
                   : "badge-neutral";
     return node("span", { class: `badge ${className}`, text: labelValue || raw || "Unknown" });
@@ -575,7 +581,7 @@
     $("#setup-step-origin").classList.toggle("complete", Boolean(publicBaseUrl));
 
     const cloudflare = objectFrom(first(connectivity, ["cloudflare", "tunnel"], first(overview, ["cloudflare"], {})));
-    const serviceUrl = plainText(first(cloudflare, ["serviceUrl", "service_url", "publicTarget", "public_target"], "http://pebble-proxy_api_1:8080"));
+    const serviceUrl = plainText(first(cloudflare, ["serviceUrl", "service_url", "publicTarget", "public_target"], ""), "");
     setCopyField($("#cloudflare-service-url"), serviceUrl);
     setCopyField($("#setup-cloudflare-target"), serviceUrl);
     const tunnelStatus = normalizeStatus(first(cloudflare, ["status", "health"], "unknown"));
@@ -787,6 +793,7 @@
       form.elements.rateLimit.value = "30";
       if (token) {
         $("#new-device-token").value = plainText(token, "");
+        $("#new-device-header-value").value = plainText(token, "");
         const tokenWebhook = $("#token-webhook");
         if (state.publicWebhookUrl) {
           $("#new-device-webhook-url").value = state.publicWebhookUrl;
@@ -1554,6 +1561,148 @@
     }
   }
 
+  function renderProcessingHealth(settings, message) {
+    const status = normalizeStatus(first(settings, ["healthStatus", "health_status", "status"], "unknown"));
+    const dot = $("#processing-health-dot");
+    const orb = $("#processing-health-orb");
+    dot.className = "status-dot";
+    orb.className = "health-orb";
+    if (status === "healthy") {
+      dot.classList.add("status-healthy");
+      orb.classList.add("healthy");
+      $("#processing-health-label").textContent = "Ready";
+      $("#processing-health-title").textContent = "Needle is ready";
+    } else if (status === "error") {
+      dot.classList.add("status-error");
+      orb.classList.add("error");
+      $("#processing-health-label").textContent = "Unavailable";
+      $("#processing-health-title").textContent = "Needle needs attention";
+    } else {
+      dot.classList.add("status-unknown");
+      $("#processing-health-label").textContent = "Not checked";
+      $("#processing-health-title").textContent = "Waiting for a health check";
+    }
+    $("#processing-health-message").textContent = plainText(
+      message || first(settings, ["lastError", "last_error"]),
+      status === "healthy" ? "The local intent router is accepting transcripts." : "Test the bundled Needle service before enabling automatic actions."
+    );
+  }
+
+  function fillProcessingForm(settings) {
+    $("#processing-enabled").checked = Boolean(first(settings, ["enabled"], false));
+    $("#processing-confidence").value = String(first(settings, ["confidenceThreshold", "confidence_threshold"], 0.2));
+    const alias = plainText(first(settings, ["agentAlias", "agent_alias"]), "");
+    const select = $("#processing-agent-alias");
+    select.replaceChildren(
+      node("option", { value: "", text: "Do not forward to an agent" }),
+      ...state.aliases.filter((item) => first(item, ["enabled"], true)).map((item) => {
+        const name = plainText(first(item, ["alias", "id"]), "");
+        return node("option", { value: name, text: name });
+      })
+    );
+    select.value = Array.from(select.options).some((option) => option.value === alias) ? alias : "";
+  }
+
+  function processingActionLabel(job) {
+    const action = objectFrom(first(job, ["action"], {}));
+    const proposed = objectFrom(first(job, ["proposedAction", "proposed_action"], {}));
+    const calls = Array.isArray(proposed.function_calls) ? proposed.function_calls : [];
+    const type = first(action, ["type"], first(calls[0], ["name"], "No action"));
+    return plainText(type, "No action").replaceAll("_", " ");
+  }
+
+  function renderProcessingJobs() {
+    const container = $("#processing-jobs");
+    if (!state.processingJobs.length) {
+      container.replaceChildren(emptyState("No decisions yet", "Enable processing, then send a new Pebble Index transcript.", "N"));
+      return;
+    }
+    container.replaceChildren(...state.processingJobs.map((job) => {
+      const status = plainText(first(job, ["status"], "pending"));
+      const confidence = first(job, ["confidence"]);
+      const error = objectFrom(first(job, ["error"], {}));
+      const action = objectFrom(first(job, ["action"], {}));
+      const controls = [];
+      if (["failed", "needs_review"].includes(status) && !Object.keys(action).length) {
+        const retry = node("button", { class: "mini-button", type: "button", text: "Retry" });
+        retry.addEventListener("click", () => retryProcessing(first(job, ["id"]), retry));
+        controls.push(retry);
+      }
+      return node(
+        "article",
+        { class: "data-row alias-row" },
+        node("div", { class: "row-primary" }, node("strong", { text: processingActionLabel(job) }), node("small", { text: `${plainText(first(job, ["deviceName", "device_name"]), "Pebble")} · ${relativeDate(first(job, ["createdAt", "created_at"]))}` })),
+        statusBadge(status, status === "needs_review" ? "Needs review" : undefined),
+        node("div", { class: "row-secondary" }, node("strong", { text: confidence == null ? "—" : `${Math.round(Number(confidence) * 100)}%` }), node("small", { text: "Confidence" })),
+        node("div", { class: "row-secondary" }, node("strong", { text: plainText(first(job, ["transcriptSource", "transcript_source"]), "Waiting") }), node("small", { text: plainText(first(error, ["message"]), "Transcript source") })),
+        node("div", { class: "row-actions" }, ...controls),
+      );
+    }));
+  }
+
+  async function loadProcessing() {
+    const container = $("#processing-jobs");
+    container.replaceChildren(loadingState());
+    const [processingResult, aliasesResult] = await Promise.allSettled([api("/processing"), api("/model-aliases")]);
+    if (aliasesResult.status === "fulfilled") state.aliases = listFrom(aliasesResult.value, ["aliases", "modelAliases"]);
+    if (processingResult.status === "rejected") {
+      container.replaceChildren(errorState(processingResult.reason, loadProcessing));
+      return;
+    }
+    const settings = objectFrom(processingResult.value, ["processing"]);
+    state.processingJobs = listFrom(processingResult.value, ["jobs"]);
+    fillProcessingForm(settings);
+    renderProcessingHealth(settings);
+    renderProcessingJobs();
+  }
+
+  async function saveProcessing(form, submitter) {
+    const data = new FormData(form);
+    setBusy(submitter, true, "Saving…");
+    try {
+      await api("/processing", {
+        method: "PUT",
+        body: {
+          enabled: data.get("enabled") === "on",
+          confidenceThreshold: Number(data.get("confidenceThreshold")),
+          agentAlias: plainText(data.get("agentAlias"), "") || null,
+        },
+      });
+      toast("Transcript processing settings saved.", "success");
+      await loadProcessing();
+    } catch (error) {
+      toast(error.message, "error", 6000);
+    } finally {
+      setBusy(submitter, false);
+    }
+  }
+
+  async function testProcessing(button) {
+    setBusy(button, true, "Testing…");
+    try {
+      const result = await api("/processing/test", { method: "POST", body: {}, timeout: 15000 });
+      renderProcessingHealth({ status: first(result, ["status"], "healthy") });
+      toast("Needle is ready.", "success");
+    } catch (error) {
+      renderProcessingHealth({ status: "error" }, error.message);
+      toast(error.message, "error", 6000);
+    } finally {
+      setBusy(button, false);
+    }
+  }
+
+  async function retryProcessing(id, button) {
+    setBusy(button, true, "Queuing…");
+    try {
+      await api(`/processing/jobs/${safeId(id)}/retry`, { method: "POST", body: {} });
+      toast("Decision queued for retry.", "success");
+      await loadProcessing();
+    } catch (error) {
+      toast(error.message, "error");
+      setBusy(button, false);
+    }
+  }
+
   function activeDevices() {
     const now = Date.now();
     return state.devices.filter((device) => {
@@ -1613,6 +1762,7 @@
       const id = first(reminder, ["id", "reminderId", "reminder_id"]);
       const completed = Boolean(first(reminder, ["completed", "isCompleted", "is_completed", "completedAt", "completed_at"], false)) || plainText(first(reminder, ["status"], "")).toLowerCase() === "completed";
       const dueAt = first(reminder, ["dueAt", "due_at", "scheduledAt", "scheduled_at"]);
+      const dueText = first(reminder, ["dueText", "due_text"]);
       const overdue = !completed && dueAt && new Date(dueAt).getTime() < Date.now();
       const check = node("button", { class: "reminder-check", type: "button", text: "✓", ariaLabel: completed ? "Mark reminder incomplete" : "Mark reminder complete" });
       check.addEventListener("click", () => toggleReminder(id, !completed, check));
@@ -1623,7 +1773,7 @@
         { class: `reminder-item${completed ? " completed" : ""}` },
         check,
         node("h4", { text: plainText(first(reminder, ["title", "text", "body"]), "Untitled reminder") }),
-        node("div", { class: `reminder-meta${overdue ? " due-overdue" : ""}` }, node("span", { text: completed ? "Completed" : overdue ? `Overdue · ${formatDate(dueAt)}` : formatDate(dueAt) }), first(reminder, ["deviceName", "device_name"]) ? node("span", { text: `· ${plainText(first(reminder, ["deviceName", "device_name"]))}` }) : null),
+        node("div", { class: `reminder-meta${overdue ? " due-overdue" : ""}` }, node("span", { text: completed ? "Completed" : overdue ? `Overdue · ${formatDate(dueAt)}` : dueAt ? formatDate(dueAt) : plainText(dueText, "No due time") }), first(reminder, ["deviceName", "device_name"]) ? node("span", { text: `· ${plainText(first(reminder, ["deviceName", "device_name"]))}` }) : null),
         remove,
       );
     }));
@@ -1745,6 +1895,7 @@
     });
     $("#close-token-dialog").addEventListener("click", () => {
       $("#new-device-token").value = "";
+      $("#new-device-header-value").value = "";
       $("#new-device-webhook-url").value = "";
       $("#token-webhook").hidden = true;
       closeDialog($("#token-dialog"));
@@ -1770,6 +1921,7 @@
     $("#backend-auth-type").addEventListener("change", updateBackendAuthFields);
     $("#test-stt").addEventListener("click", (event) => testStt(event.currentTarget));
     $("#test-tts").addEventListener("click", (event) => testTts(event.currentTarget));
+    $("#test-processing").addEventListener("click", (event) => testProcessing(event.currentTarget));
 
     bindFormDialog("#device-form", createDevice);
     bindFormDialog("#connectivity-form", saveConnectivity);
@@ -1788,6 +1940,11 @@
       event.preventDefault();
       if (!event.currentTarget.reportValidity()) return;
       saveTts(event.currentTarget, event.submitter).catch((error) => toast(error.message, "error"));
+    });
+    $("#processing-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!event.currentTarget.reportValidity()) return;
+      saveProcessing(event.currentTarget, event.submitter).catch((error) => toast(error.message, "error"));
     });
 
     document.addEventListener("visibilitychange", () => {

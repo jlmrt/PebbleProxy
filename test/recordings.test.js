@@ -59,7 +59,7 @@ function validM4a(payload = 'pebble-audio') {
   ]);
 }
 
-function multipart({ audio = null, transcription = null, recordedAt = null, client = null, boundary = null } = {}) {
+function multipart({ audio = null, transcription = null, recordedAt = null, client = null, test: testFlag = null, boundary = null } = {}) {
   boundary ||= `pebble-${Math.random().toString(16).slice(2)}`;
   const chunks = [];
   const field = (name, value) => {
@@ -74,6 +74,7 @@ function multipart({ audio = null, transcription = null, recordedAt = null, clie
   field('transcription', transcription);
   field('recordedAt', recordedAt);
   field('client', client);
+  field('test', testFlag);
   chunks.push(Buffer.from(`--${boundary}--\r\n`));
   return {
     body: Buffer.concat(chunks),
@@ -152,7 +153,8 @@ test('Index webhook is bounded, authenticated, idempotent, and manageable throug
       'content-type': form.contentType,
       'x-audio-size': String(audio.length),
       'idempotency-key': 'index-event-1',
-      authorization: 'Bearer device-token'
+      authorization: 'Bearer device-token',
+      'x-index-trigger': 'double-click-hold'
     },
     body: form.body
   };
@@ -164,6 +166,7 @@ test('Index webhook is bounded, authenticated, idempotent, and manageable throug
   assert.deepEqual(app.authCalls, [{ scope: 'webhook:write', options: { allowWebhookHeaders: true } }]);
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM recordings').get().count, 1);
   assert.equal(app.db.prepare('SELECT recorded_at FROM recordings').get().recorded_at, '2026-08-22T12:34:56.000Z');
+  assert.equal(app.db.prepare('SELECT trigger FROM recordings').get().trigger, 'double-click-hold');
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcription_jobs').get().count, 1);
   assert.equal(app.db.prepare("SELECT text FROM transcripts WHERE source = 'pebble'").get().text, 'Pebble heard this');
 
@@ -212,6 +215,27 @@ test('Index webhook is bounded, authenticated, idempotent, and manageable throug
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcripts').get().count, 0);
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcription_jobs').get().count, 0);
   await assert.rejects(fs.promises.stat(storedAudioPath), (error) => error.code === 'ENOENT');
+});
+
+test('CoreApp test events are acknowledged without creating recordings or jobs', async (t) => {
+  const app = await fixture(t);
+  for (const request of [
+    { form: multipart({ test: 'true' }), headers: {} },
+    { form: multipart({}), headers: { 'x-index-test': 'true', 'x-index-trigger': 'test-event' } }
+  ]) {
+    const response = await dispatch(app.publicRouter, {
+      method: 'POST',
+      url: '/webhooks/index',
+      headers: { 'content-type': request.form.contentType, ...request.headers },
+      body: request.form.body
+    });
+    assert.equal(response.statusCode, 202);
+    assert.equal(response.json.test, true);
+    assert.equal(response.json.stored, false);
+  }
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM recordings').get().count, 0);
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM transcription_jobs').get().count, 0);
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM processing_jobs').get().count, 0);
 });
 
 test('idempotency keys are isolated per authenticated device', async (t) => {

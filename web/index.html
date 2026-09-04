@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta name="description" content="Private control plane for Pebble Proxy on Umbrel">
     <title>Pebble Proxy</title>
-    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.5">
+    <link rel="stylesheet" href="/styles.css?v=0.1.0-test.7">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -49,6 +49,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg>
             <span>Recordings</span>
             <span class="nav-count" id="recordings-nav-count" hidden>0</span>
+          </a>
+          <a class="nav-item" href="#processing" data-route="processing">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6v2h2a2 2 0 0 1 2 2v3h-2V7H7v10h3v2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2V3Zm7 8 5 5-5 5v-3h-5v-4h5v-3Z"/></svg>
+            <span>Transcript actions</span>
           </a>
           <a class="nav-item" href="#organizer" data-route="organizer">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10a2 2 0 0 1 2 2v18l-7-3-7 3V4a2 2 0 0 1 2-2Zm0 2v14.92l5-2.14 5 2.14V4H7Zm2 3h6v2H9V7Zm0 4h6v2H9v-2Z"/></svg>
@@ -104,14 +108,14 @@
                   <p>Use the <strong>Advanced: direct container</strong> route from Radiokot’s Cloudflare Tunnel guide. In Cloudflare, add a <strong>Published application</strong> route and paste the Docker-only Service URL below. Then enter the public HTTPS hostname Cloudflare gives you.</p>
                   <div class="copy-field">
                     <label for="setup-cloudflare-target">Published application → Service URL</label>
-                    <div><input id="setup-cloudflare-target" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="setup-cloudflare-target">Copy</button></div>
+                    <div><input id="setup-cloudflare-target" type="text" readonly spellcheck="false" placeholder="Loading from Pebble Proxy"><button type="button" class="copy-button" data-copy-target="setup-cloudflare-target" disabled>Copy</button></div>
                   </div>
                   <div class="route-explanation">
                     <strong>Why this is not an umbrel.local address</strong>
                     <dl class="port-map">
                       <div><dt><code>umbrel.local:9432</code></dt><dd>Umbrel-authenticated admin launcher. Do not tunnel this for Pebble clients.</dd></div>
-                      <div><dt><code>pebble-proxy_admin_1:3000</code></dt><dd>Private admin container behind that launcher.</dd></div>
-                      <div><dt><code>pebble-proxy_api_1:8080</code></dt><dd>Token-protected API container and the correct Cloudflare Service URL.</dd></div>
+                      <div><dt><code>Private admin container</code></dt><dd>Serves the admin interface behind the Umbrel-authenticated launcher.</dd></div>
+                      <div><dt><code>Service URL shown above</code></dt><dd>Targets the token-protected API container for Cloudflare.</dd></div>
                     </dl>
                     <p>Internal container ports are isolated by container address, so another app can also use its own port 8080 without a collision. No Pebble Proxy API port is opened on the Umbrel host.</p>
                   </div>
@@ -137,9 +141,10 @@
                   <div class="client-guide-grid">
                     <article class="client-guide-card">
                       <span class="client-type">Pebble Index / CoreApp</span>
-                      <h4>Use CoreApp’s two built-in fields</h4>
+                      <h4>Fill in CoreApp’s webhook and header fields</h4>
                       <div class="copy-field"><label for="setup-index-webhook-url">Index Settings → Webhook → Webhook URL</label><div><input id="setup-index-webhook-url" type="text" readonly spellcheck="false" placeholder="Complete step 1"><button type="button" class="copy-button" data-copy-target="setup-index-webhook-url" disabled>Copy</button></div></div>
-                      <dl class="placement-list"><div><dt>Auth Token</dt><dd>Paste the raw <code>pp_…</code> token, without <code>Bearer</code>.</dd></div><div><dt>Custom headers</dt><dd>None. CoreApp sends the Auth Token as <code>X-Widget-Token</code>.</dd></div><div><dt>Send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Trigger</dt><dd>Choose the Index gesture you want, such as double-click and hold.</dd></div></dl>
+                      <div class="copy-field copy-field-secondary"><label for="setup-index-header-name">Custom header → Name</label><div><input id="setup-index-header-name" type="text" value="X-Widget-Token" readonly spellcheck="false"><button type="button" class="copy-button" data-copy-target="setup-index-header-name">Copy</button></div></div>
+                      <dl class="placement-list"><div><dt>Header name</dt><dd>Paste <code>X-Widget-Token</code> into the first custom-header field.</dd></div><div><dt>Header value</dt><dd>Paste the raw one-time <code>pp_…</code> token into the second field, without <code>Bearer</code>.</dd></div><div><dt>Send</dt><dd>Transcription only is simplest. Enable audio upload if you want LocalAI to create a second transcript.</dd></div><div><dt>Trigger</dt><dd>Choose the Index gesture you want, such as double-click and hold.</dd></div></dl>
                     </article>
                     <article class="client-guide-card">
                       <span class="client-type">Pebble watch app / custom client</span>
@@ -155,7 +160,7 @@
                 <div class="step-number" aria-hidden="true">4</div>
                 <div class="step-content">
                   <div class="step-heading"><div><span class="eyebrow">Verify</span><h3>Send one test recording</h3></div></div>
-                  <p>Trigger the ring or watch once, then open Recordings. A successful webhook appears as <strong>Received</strong> or <strong>Ready</strong>. If it does not appear, re-check the public origin and Auth Token field.</p>
+                  <p>Use CoreApp’s test button first. Pebble Proxy accepts the probe without adding it to Recordings. Then trigger the ring once; a real upload appears as <strong>Received</strong> or <strong>Ready</strong>. If it does not appear, re-check the public origin and both custom-header fields.</p>
                   <button class="button button-secondary" type="button" data-go="recordings">Open recordings</button>
                 </div>
               </li>
@@ -216,10 +221,10 @@
                   <label for="pebble-webhook-url">Pebble webhook URL</label>
                   <div><input id="pebble-webhook-url" type="text" readonly spellcheck="false" placeholder="Set the public HTTPS origin above"><button type="button" class="copy-button" id="copy-pebble-webhook-url" data-copy-target="pebble-webhook-url" disabled>Copy</button></div>
                 </div>
-                <p class="helper">Pebble Index/CoreApp: paste this into <strong>Webhook URL</strong>, then paste the raw one-time token into <strong>Auth Token</strong>—no <code>Bearer</code> prefix and no custom header. Custom clients may instead use <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+                <p class="helper">Pebble Index/CoreApp: paste this into <strong>Webhook URL</strong>. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw one-time token into the second—without a <code>Bearer</code> prefix. Custom clients may instead use <code>Authorization: Bearer &lt;token&gt;</code>.</p>
                 <div class="copy-field copy-field-secondary">
                   <label for="cloudflare-service-url">Published application Service URL (advanced/direct container)</label>
-                  <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" value="http://pebble-proxy_api_1:8080"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url">Copy</button></div>
+                  <div><input id="cloudflare-service-url" type="text" readonly spellcheck="false" placeholder="Loading from Pebble Proxy"><button type="button" class="copy-button" data-copy-target="cloudflare-service-url" disabled>Copy</button></div>
                 </div>
                 <p class="helper">Paste this exact value into Cloudflare’s Published application → Service URL. This is Radiokot’s direct-container route: port 8080 is not opened on the Umbrel host and cannot collide with another container’s internal port. Do not substitute <code>umbrel.local:9432</code>; that is the protected admin UI.</p>
               </article>
@@ -360,6 +365,37 @@
             </div>
           </section>
 
+          <section class="page" id="page-processing" data-page="processing" hidden>
+            <div class="section-toolbar">
+              <div><h2>Transcript actions</h2><p>Use local Needle inference to turn new Index transcripts into one trusted action.</p></div>
+              <div class="health-summary"><span class="status-dot status-unknown" id="processing-health-dot"></span><span id="processing-health-label">Not checked</span></div>
+            </div>
+            <article class="info-strip info-strip-accent">
+              <span aria-hidden="true">N</span>
+              <p>Needle runs in an isolated local container with telemetry and runtime downloads disabled. It can propose one note, reminder, or agent forward. Pebble Proxy validates the proposal and performs the action.</p>
+            </article>
+            <div class="content-grid settings-grid">
+              <form class="panel settings-form" id="processing-form">
+                <div class="panel-header"><div><span class="eyebrow">Local intent router</span><h3>Needle transcript processing</h3></div><label class="switch"><input type="checkbox" name="enabled" id="processing-enabled"><span></span><b>Enabled</b></label></div>
+                <div class="field-grid">
+                  <label class="field"><span>Confidence threshold</span><input name="confidenceThreshold" id="processing-confidence" type="number" min="0.05" max="0.99" step="0.01" value="0.20" required><small>Lower-confidence decisions are held for review. The bundled base model starts at 0.20.</small></label>
+                  <label class="field"><span>Agent alias <em>optional</em></span><select name="agentAlias" id="processing-agent-alias"><option value="">Do not forward to an agent</option></select><small>Required only when Needle chooses agent forwarding.</small></label>
+                </div>
+                <p class="helper">Enabling this affects new transcripts received afterward. At most one action is created per recording.</p>
+                <div class="form-actions"><button class="button button-secondary" id="test-processing" type="button">Test Needle</button><button class="button button-primary" type="submit">Save settings</button></div>
+              </form>
+              <aside class="panel health-panel">
+                <span class="eyebrow">Router health</span>
+                <div class="health-orb" id="processing-health-orb"><span></span></div>
+                <h3 id="processing-health-title">Waiting for a health check</h3>
+                <p id="processing-health-message">Test the bundled Needle service before enabling automatic actions.</p>
+                <div class="privacy-note"><strong>Create only</strong><p>This release cannot edit or delete notes and reminders. Ambiguous, unsupported, and interrupted actions stay visible for review.</p></div>
+              </aside>
+            </div>
+            <div class="section-toolbar subsection-toolbar"><div><h2>Recent decisions</h2><p>The selected transcript source, confidence, proposed action, and outcome are retained locally.</p></div></div>
+            <div class="panel table-panel"><div id="processing-jobs" class="data-list" aria-live="polite"></div></div>
+          </section>
+
           <section class="page" id="page-organizer" data-page="organizer" hidden>
             <div class="section-toolbar">
               <div><h2>Notes &amp; reminders</h2><p>A small, private MCP-ready workspace for useful voice commands.</p></div>
@@ -407,7 +443,9 @@
           </div>
           <div class="token-placement">
             <strong>Pebble Index / CoreApp</strong>
-            <p>Paste the URL above into <code>Index Settings → Webhook → Webhook URL</code>. Paste the raw token into <code>Auth Token</code>. Do not add <code>Bearer</code>; CoreApp sends it as <code>X-Widget-Token</code>.</p>
+            <p>Paste the URL above into <code>Index Settings → Webhook → Webhook URL</code>. In Custom headers, paste <code>X-Widget-Token</code> into the first field and the raw token into the second. Do not add <code>Bearer</code>.</p>
+            <div class="copy-field copy-field-secondary"><label for="new-device-header-name">Custom header → Name</label><div><input id="new-device-header-name" type="text" value="X-Widget-Token" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-name">Copy</button></div></div>
+            <div class="copy-field copy-field-secondary"><label for="new-device-header-value">Custom header → Value</label><div><input id="new-device-header-value" type="text" readonly spellcheck="false"><button class="copy-button" type="button" data-copy-target="new-device-header-value">Copy</button></div></div>
           </div>
           <div class="token-placement">
             <strong>Custom Pebble watch app or API client</strong>
@@ -480,7 +518,7 @@
     </dialog>
 
     <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
-    <script src="/clipboard.js?v=0.1.0-test.5" defer></script>
-    <script src="/app.js?v=0.1.0-test.5" defer></script>
+    <script src="/clipboard.js?v=0.1.0-test.7" defer></script>
+    <script src="/app.js?v=0.1.0-test.7" defer></script>
   </body>
 </html>

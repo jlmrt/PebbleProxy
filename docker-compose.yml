@@ -1,7 +1,7 @@
 services:
   app_proxy:
     environment:
-      APP_HOST: pebble-proxy_admin_1
+      APP_HOST: ${APP_ID:-pebble-proxy}_admin_1
       APP_PORT: 3000
     networks:
       - default
@@ -29,11 +29,13 @@ services:
       ADMIN_PORT: 3000
       DATA_DIR: /data
       APP_SEED: ${APP_SEED}
+      UMBREL_APP_ID: ${APP_ID:-pebble-proxy}
       PUBLIC_BASE_URL: ${PEBBLE_PROXY_PUBLIC_BASE_URL:-}
       ALLOWED_PUBLIC_HOSTS: ${PEBBLE_PROXY_ALLOWED_HOSTS:-}
       NODE_ENV: production
     networks:
       - admin_internal
+      - processing_internal
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
@@ -66,12 +68,13 @@ services:
       PUBLIC_BASE_URL: ${PEBBLE_PROXY_PUBLIC_BASE_URL:-}
       ALLOWED_PUBLIC_HOSTS: ${PEBBLE_PROXY_ALLOWED_HOSTS:-}
       NODE_ENV: production
-    # Intentionally Docker-network-only. Cloudflared reaches this service at
-    # pebble-proxy_api_1:8080; no API port is published on the Umbrel host.
+      NEEDLE_ROUTER_URL: http://needle:8090
+    # Intentionally Docker-network-only. No API port is published on the Umbrel host.
     expose:
       - "8080"
     networks:
       - default
+      - processing_internal
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
@@ -79,6 +82,39 @@ services:
       retries: 3
       start_period: 10s
 
+  needle:
+    build:
+      context: ./needle-sidecar
+    user: "1000:1000"
+    restart: on-failure
+    init: true
+    stop_grace_period: 20s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8090
+      NEEDLE_TELEMETRY: "0"
+      DO_NOT_TRACK: "1"
+      HF_HUB_OFFLINE: "1"
+    expose:
+      - "8090"
+    networks:
+      - processing_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 networks:
   admin_internal:
+    internal: true
+  processing_internal:
     internal: true

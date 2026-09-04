@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS recordings (
   id TEXT PRIMARY KEY,
   device_id TEXT NOT NULL REFERENCES device_credentials(id),
   client TEXT,
+  trigger TEXT,
   recorded_at TEXT,
   received_at TEXT NOT NULL,
   audio_path TEXT,
@@ -170,6 +171,49 @@ CREATE TABLE IF NOT EXISTS tts_config (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS processing_config (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  confidence_threshold REAL NOT NULL DEFAULT 0.2,
+  agent_alias TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  health_status TEXT NOT NULL DEFAULT 'unknown',
+  last_health_at TEXT,
+  last_error TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS processing_jobs (
+  id TEXT PRIMARY KEY,
+  recording_id TEXT NOT NULL UNIQUE REFERENCES recordings(id) ON DELETE CASCADE,
+  transcript_id TEXT REFERENCES transcripts(id) ON DELETE SET NULL,
+  transcript_source TEXT CHECK(transcript_source IN ('pebble','local_stt')),
+  status TEXT NOT NULL CHECK(status IN ('pending','processing','completed','failed','needs_review')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT NOT NULL,
+  lease_until TEXT,
+  config_revision INTEGER NOT NULL DEFAULT 1,
+  confidence REAL,
+  proposed_action_json TEXT,
+  last_error_code TEXT,
+  last_error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS processing_actions (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL UNIQUE REFERENCES processing_jobs(id) ON DELETE CASCADE,
+  action_type TEXT NOT NULL CHECK(action_type IN ('create_note','create_reminder','forward_agent')),
+  arguments_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('processing','completed','failed','needs_review')),
+  result_json TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notes (
   id TEXT PRIMARY KEY,
   device_id TEXT NOT NULL REFERENCES device_credentials(id) ON DELETE CASCADE,
@@ -185,6 +229,7 @@ CREATE TABLE IF NOT EXISTS reminders (
   device_id TEXT NOT NULL REFERENCES device_credentials(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   due_at TEXT,
+  due_text TEXT,
   timezone TEXT,
   completed_at TEXT,
   created_at TEXT NOT NULL,
@@ -197,7 +242,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_due ON transcription_jobs(status, next_attem
 CREATE INDEX IF NOT EXISTS idx_notes_device ON notes(device_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reminders_device ON reminders(device_id, due_at);
 CREATE INDEX IF NOT EXISTS idx_ai_audit_created ON ai_request_audit(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_processing_jobs_due ON processing_jobs(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_processing_actions_status ON processing_actions(status, updated_at DESC);
 `;
+
+function ensureColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
 
 export function nowIso() {
   return new Date().toISOString();
@@ -210,6 +262,8 @@ export function createDatabase(databasePath) {
   db.exec('PRAGMA foreign_keys=ON;');
   db.exec('PRAGMA busy_timeout=5000;');
   db.exec(SCHEMA);
+  ensureColumn(db, 'recordings', 'trigger', 'TEXT');
+  ensureColumn(db, 'reminders', 'due_text', 'TEXT');
 
   const now = nowIso();
   db.prepare(`INSERT OR IGNORE INTO agent_profiles
@@ -236,6 +290,10 @@ export function createDatabase(databasePath) {
      response_format, enabled, revision, health_status, updated_at)
     VALUES (1, 'kokoro', 'http://kokoro_web_1:8880', '/v1/audio/speech',
       '/v1/audio/voices', '/health', 'kokoro', 'af_heart', 'mp3', 0, 1, 'unknown', ?)`).run(now);
+
+  db.prepare(`INSERT OR IGNORE INTO processing_config
+    (id, enabled, confidence_threshold, agent_alias, revision, health_status, updated_at)
+    VALUES (1, 0, 0.2, NULL, 1, 'unknown', ?)`).run(now);
 
   return db;
 }

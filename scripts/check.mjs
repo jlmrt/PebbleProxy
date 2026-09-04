@@ -11,7 +11,8 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const required = [
   'Dockerfile', 'docker-compose.yml', 'umbrel-app.yml', 'exports.sh',
   'data/.gitkeep', 'hooks/pre-start', 'icon.svg',
-  'src/server.js', 'src/ai.js', 'src/recordings.js', 'src/mcp.js',
+  'src/server.js', 'src/ai.js', 'src/recordings.js', 'src/mcp.js', 'src/actions.js', 'src/processing.js',
+  'needle-sidecar/Dockerfile', 'needle-sidecar/server.py', 'needle-sidecar/fetch_engine.py', 'needle-sidecar/requirements.txt',
   'web/index.html', 'web/app.js', 'web/clipboard.js', 'web/styles.css'
 ];
 for (const relative of required) assert.ok(fs.existsSync(path.join(root, relative)), `Missing ${relative}`);
@@ -26,15 +27,32 @@ for (const file of javascript) {
 
 const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
 const manifest = fs.readFileSync(path.join(root, 'umbrel-app.yml'), 'utf8');
-assert.match(compose, /APP_HOST:\s*pebble-proxy_admin_1/);
+const manifestId = manifest.match(/^id:\s*([a-z0-9-]+)$/m)?.[1];
+const renderComposeDefaults = (source, environment = {}) => source.replace(
+  /\$\{([A-Z0-9_]+):-([^}]*)\}/g,
+  (_match, name, fallback) => environment[name] || fallback
+);
+assert.match(compose, /APP_HOST:\s*\$\{APP_ID:-pebble-proxy\}_admin_1/);
+assert.match(compose, /UMBREL_APP_ID:\s*\$\{APP_ID:-pebble-proxy\}/);
+assert.match(renderComposeDefaults(compose, { APP_ID: 'jlmrt-pebble-proxy' }), /APP_HOST:\s*jlmrt-pebble-proxy_admin_1/);
+assert.match(renderComposeDefaults(compose, { APP_ID: 'another-store-pebble-proxy' }), /APP_HOST:\s*another-store-pebble-proxy_admin_1/);
+assert.match(renderComposeDefaults(compose), /APP_HOST:\s*pebble-proxy_admin_1/);
+assert.equal(manifestId, 'pebble-proxy');
+assert.match(renderComposeDefaults(compose, { APP_ID: manifestId }), new RegExp(`APP_HOST:\\s*${manifestId}_admin_1`));
 assert.match(compose, /ROLE:\s*public/);
 assert.match(compose, /ROLE:\s*admin/);
 assert.match(compose, /admin_internal:\s*\n\s*internal:\s*true/);
+assert.match(compose, /processing_internal:\s*\n\s*internal:\s*true/);
+assert.match(compose, /NEEDLE_ROUTER_URL:\s*http:\/\/needle:8090/);
+assert.match(compose, /admin:[\s\S]*?networks:\s*\n\s*-\s*admin_internal\s*\n\s*-\s*processing_internal/,
+  'The private admin service must reach Needle for health checks');
+assert.match(compose, /NEEDLE_TELEMETRY:\s*["']0["']/);
+assert.match(compose, /HF_HUB_OFFLINE:\s*["']1["']/);
 assert.doesNotMatch(compose, /^\s+ports:\s*$/m, 'Pebble Proxy must not publish a raw host port');
 assert.match(compose, /PUBLIC_PORT:\s*8080[\s\S]*?expose:\s*\n\s*-\s*["']8080["']/,
   'Public API port 8080 must remain Docker-network-only');
 assert.match(manifest, /^port:\s*9432$/m, 'Umbrel admin launcher must stay on its assigned host port');
-assert.match(manifest, /^version:\s*["']0\.1\.0-test\.5["']$/m);
+assert.match(manifest, /^version:\s*["']0\.1\.0-test\.7["']$/m);
 assert.match(manifest, /^icon:\s*https:\/\/raw\.githubusercontent\.com\/jlmrt\/PebbleProxy\/main\/icon\.svg$/m,
   'Community-store manifests need an absolute HTTPS icon URL');
 
@@ -44,13 +62,42 @@ const browserStyles = fs.readFileSync(path.join(root, 'web/styles.css'), 'utf8')
 assert.match(html, /id="pebble-webhook-url"/);
 assert.match(html, /id="page-setup"/);
 assert.match(html, /X-Widget-Token/);
+assert.match(html, /id="processing-form"/);
+assert.match(html, /Custom header → Name/);
 assert.match(html, /umbrel\.local:9432<\/code>[\s\S]*?Do not tunnel this for Pebble clients/);
 assert.match(html, /id="tts-form"/);
 assert.match(html, /id="new-device-token"[^>]*readonly/);
 assert.match(html, /src="\/clipboard\.js/);
 assert.match(browserScript, /PebbleClipboard\.copyText/);
+assert.match(html, /id="setup-cloudflare-target"[^>]*placeholder="Loading from Pebble Proxy"[^>]*>[\s\S]*?data-copy-target="setup-cloudflare-target" disabled/);
+assert.match(html, /id="cloudflare-service-url"[^>]*placeholder="Loading from Pebble Proxy"[^>]*>[\s\S]*?data-copy-target="cloudflare-service-url" disabled/);
+assert.match(browserScript, /\["serviceUrl", "service_url", "publicTarget", "public_target"\], ""/);
+for (const [name, source] of [['web/index.html', html], ['web/app.js', browserScript]]) {
+  assert.doesNotMatch(source, /(?:jlmrt-)?pebble-proxy_(?:admin|api)_1/, `${name} must not hardcode an installed container address`);
+}
 assert.match(browserStyles, /font-size:\s*max\(1rem, 16px\)/,
   'Editable controls need a 16px iOS Safari font-size floor');
+
+function exportedApiAddress(exportsAppId) {
+  const result = spawnSync('bash', ['-c', 'set -u; source "$1"; printf "%s\\n%s\\n" "$APP_PEBBLE_PROXY_API_HOST" "$APP_PEBBLE_PROXY_API_URL"', 'bash', path.join(root, 'exports.sh')], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH || '', EXPORTS_APP_ID: exportsAppId }
+  });
+  assert.equal(result.status, 0, result.stderr || 'Failed to source exports.sh');
+  return result.stdout.trim().split('\n');
+}
+
+for (const appId of ['jlmrt-pebble-proxy', 'another-store-pebble-proxy', '']) {
+  const expectedId = appId || 'pebble-proxy';
+  assert.deepEqual(exportedApiAddress(appId), [
+    `${expectedId}_api_1`,
+    `http://${expectedId}_api_1:8080`
+  ]);
+}
+assert.deepEqual(exportedApiAddress('INVALID'), [
+  'pebble-proxy_api_1',
+  'http://pebble-proxy_api_1:8080'
+]);
 
 const preStart = path.join(root, 'hooks/pre-start');
 assert.ok(fs.statSync(preStart).mode & 0o111, 'Umbrel pre-start hook must be executable');
@@ -69,6 +116,7 @@ try {
   assert.ok(db.prepare("SELECT id FROM agent_profiles WHERE id = 'pebble'").get());
   assert.ok(db.prepare('SELECT id FROM stt_config WHERE id = 1').get());
   assert.ok(db.prepare('SELECT id FROM tts_config WHERE id = 1').get());
+  assert.ok(db.prepare('SELECT id FROM processing_config WHERE id = 1').get());
   db.close();
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });

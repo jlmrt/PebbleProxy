@@ -12,6 +12,7 @@ import {
   sendJson
 } from './http.js';
 import { secureFetch } from './security.js';
+import { enqueueProcessingJob } from './processing.js';
 
 const AUDIO_MIME_TYPES = new Set([
   'audio/mp4',
@@ -25,6 +26,7 @@ const RECORDING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 const MAX_TRANSCRIPT_BYTES = 64 * 1024;
 const MAX_CLIENT_BYTES = 256;
 const MAX_RECORDED_AT_BYTES = 128;
+const MAX_TEST_BYTES = 16;
 const MAX_STT_RESPONSE_BYTES = 1024 * 1024;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAYS_MS = [15_000, 60_000, 300_000];
@@ -154,7 +156,7 @@ function parseIndexWebhook(req, buffer) {
   }
 
   const parts = parseMultipart(buffer, contentType);
-  const allowedFields = new Set(['audio', 'transcription', 'recordedAt', 'client']);
+  const allowedFields = new Set(['audio', 'transcription', 'recordedAt', 'client', 'test']);
   const unexpected = parts.find((part) => !allowedFields.has(part.name));
   if (unexpected) throw new HttpError(400, 'unexpected_field', `Unexpected multipart field: ${unexpected.name}`);
 
@@ -162,9 +164,23 @@ function parseIndexWebhook(req, buffer) {
   const transcription = decodeField(onePart(parts, 'transcription'), MAX_TRANSCRIPT_BYTES, 'transcription');
   const recordedAtValue = decodeField(onePart(parts, 'recordedAt'), MAX_RECORDED_AT_BYTES, 'recordedAt');
   const client = decodeField(onePart(parts, 'client'), MAX_CLIENT_BYTES, 'client');
+  const testValue = decodeField(onePart(parts, 'test'), MAX_TEST_BYTES, 'test');
   validateAudioSize(req, audioPart);
 
-  if (!audioPart && !transcription) {
+  if (testValue && !['true', 'false'].includes(testValue.toLowerCase())) {
+    throw new HttpError(400, 'invalid_test_flag', 'test must be true or false');
+  }
+  const indexTestHeader = header(req, 'x-index-test').trim().toLowerCase();
+  if (indexTestHeader && !['true', 'false'].includes(indexTestHeader)) {
+    throw new HttpError(400, 'invalid_test_flag', 'X-Index-Test must be true or false');
+  }
+  const trigger = header(req, 'x-index-trigger').trim().toLowerCase() || null;
+  if (trigger && (trigger.length > 80 || !/^[a-z0-9-]+$/.test(trigger))) {
+    throw new HttpError(400, 'invalid_index_trigger', 'X-Index-Trigger is invalid');
+  }
+  const test = testValue?.toLowerCase() === 'true' || indexTestHeader === 'true' || trigger === 'test-event';
+
+  if (!test && !audioPart && !transcription) {
     throw new HttpError(400, 'missing_recording_content', 'An audio file or transcription is required');
   }
 
@@ -201,7 +217,9 @@ function parseIndexWebhook(req, buffer) {
     audio,
     transcription: transcription || null,
     recordedAt,
-    client: client || null
+    client: client || null,
+    trigger,
+    test
   };
 }
 
@@ -212,7 +230,8 @@ function payloadFingerprint(payload) {
     audio_mime: payload.audio?.mime || null,
     transcription: payload.transcription,
     recorded_at: payload.recordedAt,
-    client: payload.client
+    client: payload.client,
+    trigger: payload.trigger
   })).digest('hex');
 }
 
@@ -246,7 +265,8 @@ function assertReplayMatches(existing, payload) {
     (existing.audio_mime || null) === (payload.audio?.mime || null) &&
     (existing.pebble_transcript || null) === payload.transcription &&
     (existing.recorded_at || null) === payload.recordedAt &&
-    (existing.client || null) === payload.client;
+    (existing.client || null) === payload.client &&
+    (existing.trigger || null) === payload.trigger;
   if (!matches) {
     throw new HttpError(409, 'idempotency_conflict', 'Idempotency-Key was already used for a different recording');
   }
@@ -301,6 +321,7 @@ function webhookAck(row, deduplicated) {
     receivedAt: row.received_at,
     hasAudio: Boolean(row.audio_path),
     transcriptSources: row.pebble_transcript ? ['pebble'] : [],
+    trigger: row.trigger || null,
     deduplicated
   };
 }
@@ -355,6 +376,7 @@ function serializeRecording(row, transcripts = [], job = null) {
     id: row.id,
     deviceId: row.device_id,
     client: row.client || null,
+    trigger: row.trigger || null,
     recordedAt: row.recorded_at || null,
     receivedAt: row.received_at,
     state: row.stt_state,
@@ -421,6 +443,14 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
 
       const buffer = await readBuffer(req, config.maxWebhookBytes || 16 * 1024 * 1024);
       const payload = parseIndexWebhook(req, buffer);
+      if (payload.test) {
+        return sendJson(res, 202, {
+          accepted: true,
+          test: true,
+          stored: false,
+          trigger: payload.trigger || 'test-event'
+        }, PUBLIC_HEADERS);
+      }
       const key = idempotencyKey(req, payload, device.id);
       const duplicate = existingByIdempotency(db, key);
       if (duplicate) {
@@ -434,12 +464,13 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
       try {
         transaction(db, () => {
           db.prepare(`INSERT INTO recordings
-          (id, device_id, client, recorded_at, received_at, audio_path, audio_mime,
+          (id, device_id, client, trigger, recorded_at, received_at, audio_path, audio_mime,
            audio_size, audio_sha256, stt_state, idempotency_key, last_error, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, NULL, ?, ?)`).run(
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', ?, NULL, ?, ?)`).run(
           id,
           device.id,
           payload.client,
+          payload.trigger,
           payload.recordedAt,
           now,
           savedAudio.filename,
@@ -453,10 +484,11 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
 
           if (payload.transcription) {
             db.prepare(`INSERT INTO transcripts
-            (id, recording_id, source, text, provider, model, language, created_at)
-            VALUES (?, ?, 'pebble', ?, NULL, NULL, NULL, ?)`).run(
-            crypto.randomUUID(), id, payload.transcription, now
-          );
+              (id, recording_id, source, text, provider, model, language, created_at)
+              VALUES (?, ?, 'pebble', ?, NULL, NULL, NULL, ?)`).run(
+              crypto.randomUUID(), id, payload.transcription, now
+            );
+            enqueueProcessingJob(db, id);
           }
 
           db.prepare(`INSERT INTO transcription_jobs
@@ -486,7 +518,8 @@ export function registerRecordingRoutes(publicRouter, adminRouter, deps) {
         stt_state: 'received',
         received_at: now,
         audio_path: savedAudio.filename,
-        pebble_transcript: payload.transcription
+        pebble_transcript: payload.transcription,
+        trigger: payload.trigger
       }, false), PUBLIC_HEADERS);
     } finally {
       try { lease?.release?.(); } catch {}
@@ -887,6 +920,7 @@ function saveSttSuccess(db, claim, sttConfig, transcript) {
       sttConfig.revision, now, claim.id
     );
     db.prepare(`UPDATE recordings SET stt_state = 'ready', last_error = NULL, updated_at = ? WHERE id = ?`).run(now, claim.recording_id);
+    enqueueProcessingJob(db, claim.recording_id);
     return true;
   });
 }

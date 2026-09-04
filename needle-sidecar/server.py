@@ -1,0 +1,147 @@
+import json
+import os
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import needle
+
+
+MAX_REQUEST_BYTES = 128 * 1024
+TOOLS = [
+    {
+        "name": "create_note",
+        "description": "Save a free-form note. Notes store information; they never fire alerts.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The note content copied word for word.",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "create_reminder",
+        "description": "Create a reminder that fires at a stated time. A reminder needs both a message and a time phrase.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "description": "What to be reminded about, copied word for word.",
+                },
+                "date_time_human": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60,
+                    "description": "The user's date or time phrase copied word for word.",
+                },
+            },
+            "required": ["message", "date_time_human"],
+        },
+    },
+    {
+        "name": "forward_agent",
+        "description": "Forward an explicitly delegated request to another AI agent.",
+        "parameters": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "request": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "The delegated request copied word for word.",
+                },
+            },
+            "required": ["request"],
+        },
+    },
+]
+
+
+def system_facts(context):
+    supplied = context.get("date") if isinstance(context, dict) else None
+    try:
+        instant = datetime.fromisoformat(str(supplied).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        instant = datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    date_fact = instant.astimezone(timezone.utc).strftime("%Y-%m-%d %a %H:%M UTC")
+    return f"date: {date_fact}; locale: en; device: Pebble; assistant: Pebble Proxy"
+
+
+class RouterHandler(BaseHTTPRequestHandler):
+    server_version = "PebbleNeedle/1"
+
+    def send_json(self, status, value):
+        body = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path != "/healthz":
+            self.send_json(404, {"error": "not_found"})
+            return
+        self.send_json(200, {"status": "ok", "ready": True, "engine": "needle2"})
+
+    def do_POST(self):
+        if self.path != "/v1/route":
+            self.send_json(404, {"error": "not_found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json(400, {"error": "invalid_content_length"})
+            return
+        if length < 1 or length > MAX_REQUEST_BYTES:
+            self.send_json(413, {"error": "request_too_large"})
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+            text = payload.get("text", "")
+            if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 64 * 1024:
+                raise ValueError("invalid transcript")
+            agent = needle.Needle(tools=TOOLS, system=system_facts(payload.get("context")))
+            try:
+                agent.reset()
+                result = agent.complete(text.strip(), max_new_tokens=256)
+            finally:
+                agent.close()
+            self.send_json(200, result)
+        except (json.JSONDecodeError, ValueError):
+            self.send_json(400, {"error": "invalid_request"})
+        except Exception:
+            self.send_json(500, {"error": "inference_failed"})
+
+    def log_message(self, _format, *_args):
+        return
+
+
+def main():
+    # Load the engine before the service becomes reachable so health reflects
+    # actual inference readiness. No transcript is used for this warm-up.
+    warmup = needle.Needle(tools=TOOLS, system=system_facts({}))
+    warmup.reset()
+    warmup.close()
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8090"))
+    HTTPServer((host, port), RouterHandler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

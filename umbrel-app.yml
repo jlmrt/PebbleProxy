@@ -2,7 +2,7 @@ manifestVersion: 1
 id: pebble-proxy
 category: automation
 name: Pebble Proxy
-version: "0.1.0-test.5"
+version: "0.1.0-test.7"
 tagline: A private voice and AI gateway for Pebble apps
 icon: https://raw.githubusercontent.com/jlmrt/PebbleProxy/main/icon.svg
 description: >-
@@ -23,6 +23,7 @@ defaultPassword: ""
 submitter: Pebble Proxy Community
 submission: https://github.com/jlmrt/PebbleProxy
 releaseNotes: >-
-  Clarifies the Cloudflare Tunnel direct-container route and the separation between
-  Umbrel's host-facing admin port and Pebble Proxy's Docker-only API port. Adds an
-  explicit port map and prevents accidental raw host-port publication in package checks.
+  Adds opt-in local Needle transcript processing for creating notes, creating reminders,
+  or forwarding the original transcript to a configured private agent. CoreApp test events
+  are now accepted without being stored, Index trigger metadata is retained, and the setup
+  guide shows the custom header name and value fields.

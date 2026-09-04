@@ -12,6 +12,7 @@ import { registerMcpRoutes } from './mcp.js';
 import { registerRecordingRoutes, startSttWorker } from './recordings.js';
 import { registerTtsRoutes } from './tts.js';
 import { registerAdminRoutes, startHealthWorker } from './admin.js';
+import { startProcessingWorker } from './processing.js';
 import { adminMutationAllowed } from './security.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -27,7 +28,7 @@ function publicCorsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Widget-Token, X-Pebble-Token, X-Webhook-Token, X-Pebble-Session, Idempotency-Key, MCP-Protocol-Version',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Widget-Token, X-Pebble-Token, X-Webhook-Token, X-Pebble-Session, X-Index-Trigger, X-Index-Test, X-Audio-Size, Idempotency-Key, MCP-Protocol-Version',
     'Access-Control-Expose-Headers': 'X-Request-Id, Retry-After, MCP-Protocol-Version',
     'Access-Control-Max-Age': '86400'
   };
@@ -164,6 +165,7 @@ export function createApplication(overrides = {}) {
 
   let stopWorker = () => {};
   let stopHealthWorker = () => {};
+  let stopProcessingWorker = () => {};
   return {
     config,
     db,
@@ -180,6 +182,7 @@ export function createApplication(overrides = {}) {
           });
         }));
         stopWorker = startSttWorker(deps) || (() => {});
+        stopProcessingWorker = startProcessingWorker(deps) || (() => {});
         stopHealthWorker = startHealthWorker(deps) || (() => {});
       }
       if (config.role === 'all' || config.role === 'admin') {
@@ -196,6 +199,7 @@ export function createApplication(overrides = {}) {
     },
     async close() {
       await Promise.resolve(stopWorker());
+      await Promise.resolve(stopProcessingWorker());
       await Promise.resolve(stopHealthWorker());
       const close = (server) => server.listening ? new Promise((resolve) => server.close(resolve)) : Promise.resolve();
       await Promise.all([close(publicServer), close(adminServer)]);

@@ -22,6 +22,14 @@ function integerList(value, fallback) {
   return parsed.length ? parsed : fallback;
 }
 
+function umbrelAppId(value) {
+  const appId = String(value || 'pebble-proxy');
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(appId)) {
+    throw new Error('UMBREL_APP_ID must be a lowercase kebab-case Umbrel app ID');
+  }
+  return appId;
+}
+
 export function loadConfig(overrides = {}) {
   const env = { ...process.env, ...overrides };
   const role = ['all', 'public', 'admin'].includes(env.ROLE) ? env.ROLE : 'all';
@@ -43,6 +51,7 @@ export function loadConfig(overrides = {}) {
     publicPort: integer(env.PUBLIC_PORT, 8080, 1, 65535),
     adminHost: env.ADMIN_HOST || '0.0.0.0',
     adminPort: integer(env.ADMIN_PORT, 3000, 1, 65535),
+    umbrelAppId: umbrelAppId(env.UMBREL_APP_ID),
     appSeed: env.APP_SEED || '',
     publicBaseUrl: env.PUBLIC_BASE_URL || '',
     allowedPublicHosts: list(env.ALLOWED_PUBLIC_HOSTS),
@@ -52,6 +61,10 @@ export function loadConfig(overrides = {}) {
     sttTimeoutMs: integer(env.STT_TIMEOUT_MS, 120000, 5000, 600000),
     sttMaxAttempts: integer(env.STT_MAX_ATTEMPTS, 3, 1, 10),
     sttRetryDelaysMs: integerList(env.STT_RETRY_DELAYS_MS, [15000, 60000, 300000]),
+    needleRouterUrl: env.NEEDLE_ROUTER_URL || 'http://needle:8090',
+    processingTimeoutMs: integer(env.PROCESSING_TIMEOUT_MS, 30000, 5000, 120000),
+    processingMaxAttempts: integer(env.PROCESSING_MAX_ATTEMPTS, 3, 1, 10),
+    processingRetryDelaysMs: integerList(env.PROCESSING_RETRY_DELAYS_MS, [15000, 60000, 300000]),
     ttsTimeoutMs: integer(env.TTS_TIMEOUT_MS, 120000, 5000, 600000),
     ttsMaxResponseBytes: integer(env.TTS_MAX_RESPONSE_BYTES, 32 * 1024 * 1024, 1024, 128 * 1024 * 1024),
     aiTimeoutMs: integer(env.AI_TIMEOUT_MS, 90000, 5000, 600000),
